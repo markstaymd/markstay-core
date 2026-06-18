@@ -1,0 +1,39 @@
+{
+  "name": "markstay",
+  "version": "0.1.1",
+  "description": "Reference JavaScript implementation of the markstay spec (v1.1, parser-free core)",
+  "type": "module",
+  "license": "MIT",
+  "author": "markstaymd <markstaymd@users.noreply.github.com>",
+  "homepage": "https://markstay.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markstaymd/markstay-core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/markstaymd/markstay-core/issues"
+  },
+  "keywords": [
+    "markstay",
+    "markdown",
+    "block-identity",
+    "content-addressed",
+    "diff",
+    "linter",
+    "spec"
+  ],
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
