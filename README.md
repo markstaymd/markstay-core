@@ -1,5 +1,11 @@
 # markstay , JavaScript reference implementation (v1 core)
 
+[![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
+[![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
+[![spec](https://img.shields.io/badge/spec-v1.1-blue)](https://markstay.org)
+![License](https://img.shields.io/npm/l/markstay)
+
 A second, independent implementation of the [markstay spec](https://markstay.org)
 (v1.1), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
