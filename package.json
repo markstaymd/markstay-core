@@ -1,7 +1,7 @@
 {
   "name": "markstay",
-  "version": "0.1.1",
-  "description": "Reference JavaScript implementation of the markstay spec (v1.1, parser-free core)",
+  "version": "0.2.0",
+  "description": "Reference JavaScript implementation of the markstay spec (v1.1, parser-free core) with a stamp/lint CLI",
   "type": "module",
   "license": "MIT",
   "author": "markstaymd <markstaymd@users.noreply.github.com>",
@@ -22,11 +22,19 @@
     "linter",
     "spec"
   ],
+  "types": "./src/index.d.ts",
+  "bin": {
+    "markstay": "./bin/cli.js"
+  },
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
   },
   "files": [
     "src",
+    "bin",
     "README.md",
     "LICENSE"
   ],

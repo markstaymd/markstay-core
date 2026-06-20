@@ -70,3 +70,34 @@ export function stripMarkers(text) {
     .replace(new RegExp(HTML_MARKER_SRC, "gs"), "")
     .replace(new RegExp(MDX_MARKER_SRC, "gs"), "");
 }
+
+// One combined HTML|MDX pattern so a single ordered pass sees every marker in
+// document order (rather than all HTML then all MDX). Capture group 1 is the HTML
+// body, group 2 the MDX body; exactly one is set per match.
+const COMBINED_MARKER_SRC = `${HTML_MARKER_SRC}|${MDX_MARKER_SRC}`;
+
+/**
+ * Rewrite markers in place, in document order, without disturbing surrounding
+ * text. `transform(marker)` receives { id, hash, raw, syntax, body } and returns
+ * a replacement string, or null/undefined to leave the marker unchanged. The
+ * write helpers (restamp, repairDuplicates) build on this so marker edits reuse
+ * the one canonical grammar instead of re-deriving it.
+ */
+export function rewriteMarkers(text, transform) {
+  const re = new RegExp(COMBINED_MARKER_SRC, "gs");
+  return text.replace(re, (full, htmlBody, mdxBody) => {
+    const body = htmlBody !== undefined ? htmlBody : mdxBody;
+    const syntax = htmlBody !== undefined ? "html" : "mdx";
+    const idm = ID_RE.exec(body);
+    const hm = HASH_RE.exec(body);
+    const marker = {
+      id: idm ? idm[1] : null,
+      hash: hm ? hm[1].toLowerCase() : null,
+      raw: full,
+      syntax,
+      body,
+    };
+    const out = transform(marker);
+    return out === undefined || out === null ? full : out;
+  });
+}

@@ -5,9 +5,18 @@
 
 export { normalizeBody, bodyHash } from "./hash.js";
 export { asciiTrim } from "./text.js";
-export { findMarkers, stripMarkers } from "./markers.js";
+export { findMarkers, stripMarkers, rewriteMarkers } from "./markers.js";
 export { segmentBlankLine } from "./segment.js";
 export { parseDocument } from "./parse.js";
+export { mintId, DEFAULT_ALPHABET, DEFAULT_ID_LENGTH, ID_CHARSET } from "./id.js";
+export {
+  formatMarker,
+  formatAttrValue,
+  stamp,
+  restamp,
+  repairDuplicates,
+  DEFAULT_HASH_LENGTH,
+} from "./stamp.js";
 export {
   lintDocument,
   lintBlocks,

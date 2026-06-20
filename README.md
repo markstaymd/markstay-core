@@ -14,15 +14,39 @@ implementation gated by a shared language-neutral conformance corpus turns "two
 implementations agree" from an assertion into a tested fact.
 
 This is the **parser-free core**: everything string-level and parser-independent.
-The CommonMark-tree (§5.2) mdast adapter ships separately as `remark-stay`.
+It covers both halves of the spec, the read side (parse / lint / resolve) and the
+write side (mint ids, stamp a document, refresh hashes, repair duplicates). The
+CommonMark-tree (§5.2) mdast adapter ships separately as `remark-stay`.
 
 ## Install
 
 ```sh
-npm install markstay
+npm install markstay        # library
+npm install -g markstay     # or use the `markstay` CLI via npx
 ```
 
 Requires Node >= 22 (uses `node:crypto`). Zero runtime dependencies.
+
+## CLI
+
+```sh
+markstay lint    FILE...            # well-formedness + intra-doc checks (§7/§8/§10)
+markstay lint    --before OLD NEW   # regeneration diff (§11)
+markstay stamp   FILE... [-w]       # mint ids for every unmarked block (§6)
+markstay restamp FILE... [-w]       # refresh hashes that drifted (§8)
+markstay repair  FILE... [-w]       # mint fresh ids for duplicate ids (§7)
+```
+
+`lint` exits non-zero when any error-level finding is reported, so it gates a
+commit hook or an agent's post-edit step (`--json` for machine output). The write
+verbs print to stdout by default; `-w`/`--write` edits in place. `stamp` takes
+`--mdx` (emit the `{/* ... */}` form), `--no-hash`, and `--hash-length N`.
+
+```sh
+$ printf 'Hello world.\n' > doc.md && markstay stamp doc.md
+Hello world.
+<!-- stay:B81r4tJA hash=sha256:aa3ec16e6acc -->   # id is random; hash is the §8 body hash
+```
 
 ## Layout
 
@@ -36,20 +60,41 @@ src/
   lint.js      §7/§8/§10 lint + §11 regeneration diff
   quote.js     §9 quote/selector scoring (body score, context bonus, best match)
   resolve.js   §9.1 resolution ladder (MARKER -> HASH -> QUOTE -> DETACHED)
+  id.js        §6 opaque id minting (injectable byte source)
+  stamp.js     §3/§4/§6/§7/§8 write path: formatMarker, stamp, restamp, repair
   text.js      shared ASCII whitespace + ASCII case-fold helpers (§8/§5/§9)
   index.js     public API
+bin/
+  cli.js       the `markstay` CLI (lint / stamp / restamp / repair)
 test/
   conformance.test.js   runs the shared corpus (conformance/)
   unit.test.js          behavioral ports of the Python reference's lint/attach tests
+  stamp.test.js         write-path invariants (stamp/restamp/repair, idempotence)
 ```
 
 ## Public API
 
-`normalizeBody`, `bodyHash`, `asciiTrim`, `findMarkers`, `stripMarkers`,
-`segmentBlankLine`, `parseDocument`, `lintDocument`, `lintDiff`, `sortFindings`,
-`hasErrors`, `ratio`, `matchingBlocks`, `normalize`, `quoteRatio`, `bodyScore`,
-`contextBonus`, `bestMatch`, `buildAnchors`, `resolve` (mirrors the Python
-reference surface).
+Read side (mirrors the Python reference surface): `normalizeBody`, `bodyHash`,
+`asciiTrim`, `findMarkers`, `stripMarkers`, `segmentBlankLine`, `parseDocument`,
+`lintDocument`, `lintDiff`, `sortFindings`, `hasErrors`, `ratio`, `matchingBlocks`,
+`normalize`, `quoteRatio`, `bodyScore`, `contextBonus`, `bestMatch`,
+`buildAnchors`, `resolve`.
+
+Write side (string-level, parser-free):
+
+- `mintId(opts?)` , a short opaque id (§6); `opts.random` injects a byte source
+  for deterministic tests.
+- `formatMarker({ id, hash?, attrs?, syntax? })` , serialize one marker (§3/§4),
+  with `formatAttrValue` and `rewriteMarkers` as the lower-level pieces.
+- `stamp(md, opts?)` , mint an id for every unmarked block and append its trailing
+  marker. Returns `{ text, minted }`; never alters block bodies and is idempotent.
+- `restamp(md, opts?)` , refresh hashes that drifted (the deliberate "I edited
+  this on purpose" step); `{ addMissing: true }` adds a hash to markers lacking one.
+- `repairDuplicates(md, opts?)` , the first block keeps a duplicated id, every
+  later one is re-minted (§7 copy-mints-new).
+
+Every minting path funnels through an injectable id factory, so the write helpers
+are deterministic under test.
 
 ## Running the tests
 
@@ -64,8 +109,8 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The full JS suite is **315 tests** (292 conformance assertions + 23 unit ports),
-exit 0.
+The full JS suite is **336 tests** (292 conformance assertions + 23 unit ports +
+21 write-path tests), exit 0.
 
 ## The conformance corpus (the actual deliverable)
 
