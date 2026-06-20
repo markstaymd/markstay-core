@@ -84,6 +84,13 @@ test("formatMarker: rejects bad id, non-hex hash, and terminator-bearing values"
   assert.throws(() => formatMarker({ id: "ok", attrs: { "x-k": "a*/}b" }, syntax: "mdx" }));
 });
 
+test("formatAttrValue: rejects characters outside the §4 qchar set", () => {
+  // §4 qchar is printable ASCII only; newline/tab/control/non-ASCII have no form
+  assert.throws(() => formatMarker({ id: "x", attrs: { "x-v": "line\nbreak" } }));
+  assert.throws(() => formatAttrValue("tab\there"));
+  assert.throws(() => formatAttrValue("café")); // non-ASCII
+});
+
 // --- stamp (§5 / §6 / §8) ---
 
 const DOC = `# Title
@@ -197,6 +204,15 @@ test("repairDuplicates: first occurrence kept, later ones re-minted, lints clean
   assert.deepEqual(renamed, [{ from: "dup", to: "fresh1" }]);
   assert.ok(text.includes("stay:dup")); // first kept
   assert.ok(text.includes("stay:fresh1")); // second re-minted
+  assert.deepEqual(errorCodes(text), []);
+});
+
+test("repairDuplicates: repairs two same-id markers on one block", () => {
+  // lint flags two markers sharing an id on ONE block; repair must fix it too
+  const md = "A.\n<!-- stay:dup -->\n<!-- stay:dup -->";
+  assert.ok(errorCodes(md).includes("DUPLICATE_ID"));
+  const { text, renamed } = repairDuplicates(md, { newId: () => "fresh1" });
+  assert.deepEqual(renamed, [{ from: "dup", to: "fresh1" }]);
   assert.deepEqual(errorCodes(text), []);
 });
 

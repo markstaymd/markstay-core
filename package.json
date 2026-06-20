@@ -1,6 +1,6 @@
 {
   "name": "markstay",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reference JavaScript implementation of the markstay spec (v1.1, parser-free core) with a stamp/lint CLI",
   "type": "module",
   "license": "MIT",

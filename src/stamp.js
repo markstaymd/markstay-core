@@ -33,6 +33,15 @@ const TERMINATOR = { html: "-->", mdx: "*/}" };
  */
 export function formatAttrValue(value) {
   const s = String(value);
+  // §4 qchar: a value may only contain printable ASCII (0x20-0x7E); `"` and `\`
+  // are escaped in the quoted form. A newline or other control character has no
+  // representation and would corrupt the marker, so reject rather than emit it.
+  if (!/^[\x20-\x7E]*$/.test(s)) {
+    throw new Error(
+      `formatAttrValue: value ${JSON.stringify(s)} contains a character outside ` +
+        "the §4 qchar set (printable ASCII 0x20-0x7E)"
+    );
+  }
   if (s.length > 0 && /^[\x21-\x7E]+$/.test(s) && !s.includes('"')) return s;
   return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
@@ -219,19 +228,20 @@ export function repairDuplicates(md, opts = {}) {
   const blocks = parseDocument(norm);
 
   const used = new Set();
-  const blockCount = new Map(); // id -> number of distinct content blocks carrying it
+  const count = new Map(); // id -> number of marker occurrences carrying it
   for (const b of blocks) {
     if (b.index < 0) continue;
-    const here = new Set();
     for (const mk of b.markers) {
       if (mk.id && !mk.malformed) {
         used.add(mk.id);
-        here.add(mk.id);
+        count.set(mk.id, (count.get(mk.id) || 0) + 1);
       }
     }
-    for (const id of here) blockCount.set(id, (blockCount.get(id) || 0) + 1);
   }
-  const dup = new Set([...blockCount].filter(([, c]) => c > 1).map(([id]) => id));
+  // A duplicate is any id on more than one marker, so two markers sharing an id
+  // on the *same* block (which lintDocument also flags) are repaired, not just
+  // the copy-across-blocks case.
+  const dup = new Set([...count].filter(([, c]) => c > 1).map(([id]) => id));
   if (dup.size === 0) return { text: norm, renamed: [] };
 
   const nextId = uniqueMinter(used, newId ?? (() => mintId({ length, alphabet, random })));

@@ -14,6 +14,7 @@ import {
   lintDocument, lintDiff, sortFindings, ratio, matchingBlocks,
   quoteRatio, bodyScore, contextBonus, bestMatch,
   buildAnchors, resolve as resolveAnchors,
+  stamp, restamp, repairDuplicates,
 } from "../src/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -125,9 +126,42 @@ function vResolve(v) {
   return { ok: approx(got, v.resolutions), got };
 }
 
+const seqFactory = (ids) => {
+  let i = 0;
+  return () => ids[i++];
+};
+
+function vStamp(v) {
+  const op = v.op;
+  const o = v.options ?? {};
+  let got;
+  if (op === "stamp") {
+    const r = stamp(v.input, {
+      syntax: o.syntax ?? "html",
+      hash: o.hash ?? true,
+      ...(o.hashLength !== undefined ? { hashLength: o.hashLength } : {}),
+      newId: seqFactory(v.ids),
+    });
+    got = { text: r.text, minted: r.minted };
+  } else if (op === "restamp") {
+    const r = restamp(v.input, {
+      ...(o.hashLength !== undefined ? { hashLength: o.hashLength } : {}),
+      addMissing: o.addMissing ?? false,
+    });
+    got = { text: r.text, refreshed: r.refreshed };
+  } else if (op === "repair") {
+    const r = repairDuplicates(v.input, { newId: seqFactory(v.ids) });
+    got = { text: r.text, renamed: r.renamed };
+  } else {
+    return { ok: false, got: `unknown stamp op: ${op}` };
+  }
+  return { ok: approx(got, v.expected), got };
+}
+
 const VERIFIERS = {
   hash: vHash, markers: vMarkers, parse: vParse, lint: vLint,
   diff: vDiff, seqmatch: vSeqmatch, score: vScore, resolve: vResolve,
+  stamp: vStamp,
 };
 
 // --- drive the corpus ------------------------------------------------------
