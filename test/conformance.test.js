@@ -14,7 +14,7 @@ import {
   lintDocument, lintDiff, sortFindings, ratio, matchingBlocks,
   quoteRatio, bodyScore, contextBonus, bestMatch,
   buildAnchors, resolve as resolveAnchors,
-  stamp, restamp, repairDuplicates,
+  stamp, restamp, repairDuplicates, mintId,
 } from "../src/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -131,6 +131,24 @@ const seqFactory = (ids) => {
   return () => ids[i++];
 };
 
+// Id-minting vectors (§6): a fixed byte array is the injected source, consumed
+// in order across the rejection loop's random(n) draws, so rejection sampling is
+// exercised identically in all three impls.
+function vMint(v) {
+  let i = 0;
+  const random = (n) => {
+    const out = Uint8Array.from(v.bytes.slice(i, i + n));
+    i += n;
+    return out;
+  };
+  const got = mintId({
+    length: v.length,
+    ...(v.alphabet !== undefined ? { alphabet: v.alphabet } : {}),
+    random,
+  });
+  return { ok: approx(got, v.expected), got };
+}
+
 function vStamp(v) {
   const op = v.op;
   const o = v.options ?? {};
@@ -161,7 +179,7 @@ function vStamp(v) {
 const VERIFIERS = {
   hash: vHash, markers: vMarkers, parse: vParse, lint: vLint,
   diff: vDiff, seqmatch: vSeqmatch, score: vScore, resolve: vResolve,
-  stamp: vStamp,
+  stamp: vStamp, mint: vMint,
 };
 
 // --- drive the corpus ------------------------------------------------------
