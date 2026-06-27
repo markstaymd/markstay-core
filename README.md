@@ -42,6 +42,14 @@ commit hook or an agent's post-edit step (`--json` for machine output). The writ
 verbs print to stdout by default; `-w`/`--write` edits in place. `stamp` takes
 `--mdx` (emit the `{/* ... */}` form), `--no-hash`, and `--hash-length N`.
 
+`HASH_DRIFT` (a block edited in place) never blocks and is the dominant line in a
+normal edit, so the text render **hides it by default** and collapses it to one
+receipt (`-> N hash-drift findings hidden (--show-drift to list)`); pass
+`--show-drift` to enumerate it. This is presentation only: the finding stays at
+`warn` in the `lintDocument` / `lintDiff` return values and in `--json` (which is
+byte-identical with and without `--show-drift`), so caches and re-embed triggers
+that treat a stale hash as fatal read those, unaffected.
+
 ```sh
 $ printf 'Hello world.\n' > doc.md && markstay stamp doc.md
 Hello world.

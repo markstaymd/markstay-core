@@ -40,6 +40,8 @@ Commands:
 Options:
   -w, --write        edit files in place (write verbs; required for >1 file)
       --json         machine-readable output (lint)
+      --show-drift   list HASH_DRIFT findings in lint text output (hidden by
+                     default; --json always carries them)
       --before FILE  baseline for a regeneration diff (lint)
       --mdx          emit the MDX comment form {/* ... */} (stamp)
       --no-hash      do not write a hash attribute (stamp)
@@ -61,6 +63,7 @@ function parseArgs(rest, valueFlags) {
     const a = rest[i];
     if (a === "-w" || a === "--write") flags.write = true;
     else if (a === "--json") flags.json = true;
+    else if (a === "--show-drift") flags.showDrift = true;
     else if (a === "--mdx") flags.mdx = true;
     else if (a === "--no-hash") flags.noHash = true;
     else if (a === "--add-missing") flags.addMissing = true;
@@ -71,12 +74,23 @@ function parseArgs(rest, valueFlags) {
   return { files, flags };
 }
 
-function renderText(label, findings) {
+// Human render. HASH_DRIFT is the dominant, non-actionable line in normal use
+// (it never blocks; it only ever says "you edited things"), so it is hidden by
+// default and collapsed to one discoverable line. `showDrift=true` lists it.
+// `--json` and the return tuples always carry drift, so the structured channel
+// is unaffected. The error/warn/info summary counts the real totals either way.
+function renderText(label, findings, showDrift = false) {
   if (!findings.length) return `${label}: clean (no findings)`;
   const out = [`${label}:`];
-  for (const f of sortFindings(findings)) {
+  const shown = showDrift ? findings : findings.filter((f) => f.code !== "HASH_DRIFT");
+  const nDriftHidden = findings.length - shown.length;
+  for (const f of sortFindings(shown)) {
     const where = f.line ? `L${f.line}` : "-";
     out.push(`  [${f.level.padEnd(5)}] ${(f.code ?? "").padEnd(16)} ${where.padStart(5)}  ${f.message}`);
+  }
+  if (nDriftHidden) {
+    const noun = nDriftHidden === 1 ? "finding" : "findings";
+    out.push(`  -> ${nDriftHidden} hash-drift ${noun} hidden (--show-drift to list)`);
   }
   const n = (lvl) => findings.filter((x) => x.level === lvl).length;
   out.push(`  -> ${n("error")} error, ${n("warn")} warn, ${n("info")} info`);
@@ -100,7 +114,7 @@ function cmdLint(rest) {
     for (const [label, fs] of results) payload[label] = sortFindings(fs);
     process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
   } else {
-    process.stdout.write(results.map(([l, fs]) => renderText(l, fs)).join("\n") + "\n");
+    process.stdout.write(results.map(([l, fs]) => renderText(l, fs, flags.showDrift)).join("\n") + "\n");
   }
   return results.some(([, fs]) => hasErrors(fs)) ? 1 : 0;
 }

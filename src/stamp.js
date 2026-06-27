@@ -201,7 +201,9 @@ export function restamp(md, opts = {}) {
       const now = bodyHash(content, len);
       if (now === mk.hash) return null; // unchanged at this precision
       refreshed.push(mk.id);
-      return mk.raw.replace(/hash\s*=\s*sha256:[0-9a-fA-F]+/, `hash=sha256:${now}`);
+      // \b mirrors the read-path HASH_RE: without it the sub false-matches the
+      // `hash` inside a custom key like `rehash` and corrupts a §4-preserved key.
+      return mk.raw.replace(/\bhash\s*=\s*sha256:[0-9a-fA-F]+/, `hash=sha256:${now}`);
     }
     if (addMissing) {
       const now = bodyHash(content, hashLength ?? DEFAULT_HASH_LENGTH);
