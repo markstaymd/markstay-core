@@ -204,3 +204,60 @@ test("--json carries findings and notes in the structured channel", () => {
     assert.ok(parsed.findings[key].some((f) => f.code === "DROPPED_ID"), out);
   });
 });
+
+// --- check-worktree: the same question, asked of the files on disk ---------------
+// Commit-time checking fires once per commit. A measured loss sat in a working tree
+// for 12 days and then landed inside a 406-line batch commit, so the commit hook
+// could only ever have caught it at the very end.
+
+function checkWorktree(repo, args = []) {
+  const r = spawnSync(process.execPath, [CLI, "check-worktree", ...args], {
+    cwd: repo, encoding: "utf8",
+  });
+  const stdout = r.stdout ?? "";
+  const stderr = r.stderr ?? "";
+  return { code: r.status ?? 1, stdout, stderr, out: stdout + stderr };
+}
+
+test("check-worktree sees a loss before anything is staged", () => {
+  withRepo((repo, write) => {
+    write("a.md", doc(4));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+
+    write("a.md", "# Doc\n\n## All of it\n\nCollapsed.\n<!-- stay:s0 -->\n");
+    assert.equal(git(repo, "diff", "--cached", "--name-only").trim(), "");
+    assert.equal(check(repo).out.trim(), "", "nothing staged, so check-staged is quiet");
+
+    const { code, out } = checkWorktree(repo);
+    assert.equal(code, 1, out);
+    assert.equal((out.match(/DROPPED_ID/g) ?? []).length, 3, out);
+  });
+});
+
+test("check-worktree pairs an untracked rename", () => {
+  withRepo((repo, write) => {
+    write("STATUS.md", doc(9));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+
+    rmSync(join(repo, "STATUS.md"));
+    write("PHASE1.md", "# Doc\n\n## Phase 1 (complete)\n\nAll nine done.\n<!-- stay:s0 -->\n");
+    const { code, out } = checkWorktree(repo);
+    assert.equal(code, 1, out);
+    assert.equal((out.match(/DROPPED_ID/g) ?? []).length, 8, out);
+    assert.ok(out.includes("baseline STATUS.md"), out);
+  });
+});
+
+test("check-worktree is quiet on a stay-preserving edit", () => {
+  withRepo((repo, write) => {
+    write("a.md", doc(3));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+    write("a.md", doc(3).replace("Body text for section 1", "Reworded section 1"));
+    const { code, out } = checkWorktree(repo);
+    assert.equal(code, 0, out);
+    assert.equal(out.trim(), "", out);
+  });
+});

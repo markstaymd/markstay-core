@@ -33,6 +33,7 @@ Requires Node >= 22 (uses `node:crypto`). Zero runtime dependencies.
 markstay lint    FILE...            # well-formedness + intra-doc checks (§7/§8/§10)
 markstay lint    --before OLD NEW   # regeneration diff (§11)
 markstay check-staged [FILE...]     # lint the staged commit vs its baseline (§11)
+markstay check-worktree [FILE...]   # the same check against the files on disk
 markstay stamp   FILE... [-w]       # mint ids for every unmarked block (§6)
 markstay restamp FILE... [-w]       # refresh hashes that drifted (§8)
 markstay repair  FILE... [-w]       # mint fresh ids for duplicate ids (§7)
@@ -79,6 +80,11 @@ machine output, `--show-drift` to see the quiet findings anyway.
 lint-staged appends the matched filenames, which scope the *report*. The commit is
 still read whole, because a renamed document's baseline lives in a deleted path and
 lint-staged never passes one.
+
+`check-worktree` asks the same question of the files on disk, staged or not, including
+untracked ones. A commit hook fires once per commit, which can be days after an editing
+pass and inside a diff too large to read line by line; this reports in seconds, so it
+suits an agent's post-edit step rather than a gate.
 
 **The baseline is resolved by stay id, not by filename.** git's rename detection is
 content-similarity based, and similarity is anti-correlated with this failure mode:

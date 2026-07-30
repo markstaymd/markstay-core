@@ -18,6 +18,7 @@
 // converge on this subcommand form (see the umbrella adoption plan).
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { relative, resolve as resolvePath } from "node:path";
 import {
@@ -39,6 +40,8 @@ Commands:
   lint     --before OLD.md NEW.md   regeneration diff between two versions
   check-staged [FILE...]            lint the staged commit against its baseline
                                     (for husky / lint-staged; FILE... scopes output)
+  check-worktree [FILE...]          the same check against the files on disk,
+                                    staged or not (for a post-edit step)
   stamp    FILE...                  mint ids for unmarked blocks
   restamp  FILE...                  refresh hashes that drifted
   repair   FILE...                  mint fresh ids for duplicate ids
@@ -184,14 +187,64 @@ function stagedEntries() {
   return out;
 }
 
+/** Changes between HEAD and the working tree, staged or not, plus untracked files.
+ *
+ * Commit-time checking fires once per commit, which can be days after an editing pass
+ * and inside a diff too large to read line by line. Untracked files count: an agent
+ * that rewrites a document under a new name leaves a deleted path and an untracked
+ * one, which is exactly the rename case. */
+function worktreeEntries() {
+  const raw = git(["diff", "HEAD", "--name-status", "-z", "--find-renames"], {
+    allowFail: true,
+  });
+  const fields = (raw ?? "").split("\0");
+  const out = [];
+  for (let i = 0; i < fields.length && fields[i]; ) {
+    const status = fields[i][0];
+    if ((status === "R" || status === "C") && i + 2 < fields.length) {
+      out.push([status, fields[i + 1], fields[i + 2]]);
+      i += 3;
+    } else if (i + 1 < fields.length) {
+      out.push([status, fields[i + 1], fields[i + 1]]);
+      i += 2;
+    } else break;
+  }
+  for (const path of (git(["ls-files", "--others", "--exclude-standard", "-z"]) ?? "").split("\0")) {
+    if (path) out.push(["A", path, path]);
+  }
+  return out;
+}
+
 const headText = (path) => git(["show", `HEAD:${path}`], { allowFail: true });
 const idsOf = (text) =>
   text == null ? new Set() : new Set(idIndex(parseDocument(text)).keys());
 
 function cmdCheckStaged(rest) {
+  return runCheck("check-staged", rest, (top) => ({
+    entries: stagedEntries(),
+    afterText: (p) => git(["show", `:${p}`], { allowFail: true }) ?? "",
+  }));
+}
+
+/** The same check against the files on disk, for an agent's post-edit step rather
+ *  than a commit hook. */
+function cmdCheckWorktree(rest) {
+  return runCheck("check-worktree", rest, (top) => ({
+    entries: worktreeEntries(),
+    afterText: (p) => {
+      try {
+        return readFileSync(join(top, p), "utf8");
+      } catch {
+        return "";
+      }
+    },
+  }));
+}
+
+function runCheck(verb, rest, source) {
   const { files, flags } = parseArgs(rest, new Set());
   const root = git(["rev-parse", "--show-toplevel"], { allowFail: true });
-  if (!root) fail("check-staged must run inside a git work tree");
+  if (!root) fail(`${verb} must run inside a git work tree`);
   const top = root.trim();
 
   // lint-staged appends the matched filenames (absolute by default). Treat them as
@@ -202,14 +255,12 @@ function cmdCheckStaged(rest) {
     files.map((f) => relative(top, resolvePath(process.cwd(), f)).split("\\").join("/")),
   );
 
-  const entries = stagedEntries();
+  const { entries, afterText } = source(top);
   const changed = entries.filter(([st, , dst]) => st !== "D" && isMd(dst));
   const deleted = entries.filter(([st, src]) => st === "D" && isMd(src)).map(([, src]) => src);
   if (!changed.length && !deleted.length) return 0;
 
-  const stagedText = new Map(
-    changed.map(([, , dst]) => [dst, git(["show", `:${dst}`])]),
-  );
+  const stagedText = new Map(changed.map(([, , dst]) => [dst, afterText(dst)]));
   const stagedIds = new Map([...stagedText].map(([p, t]) => [p, idsOf(t)]));
   const committedIds = new Set();
   for (const s of stagedIds.values()) for (const id of s) committedIds.add(id);
@@ -374,6 +425,8 @@ function main(argv) {
       return cmdLint(rest);
     case "check-staged":
       return cmdCheckStaged(rest);
+    case "check-worktree":
+      return cmdCheckWorktree(rest);
     case "stamp":
       return cmdStamp(rest);
     case "restamp":
