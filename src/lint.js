@@ -77,7 +77,7 @@ export function lintDocument(md, mode = "blank-line") {
 }
 
 /** id -> list of content blocks carrying that id, in document order. */
-function idIndex(blocks) {
+export function idIndex(blocks) {
   const out = new Map();
   for (const b of blocks) {
     if (b.index < 0) continue;

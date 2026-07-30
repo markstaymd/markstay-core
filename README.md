@@ -32,6 +32,7 @@ Requires Node >= 22 (uses `node:crypto`). Zero runtime dependencies.
 ```sh
 markstay lint    FILE...            # well-formedness + intra-doc checks (§7/§8/§10)
 markstay lint    --before OLD NEW   # regeneration diff (§11)
+markstay check-staged [FILE...]     # lint the staged commit vs its baseline (§11)
 markstay stamp   FILE... [-w]       # mint ids for every unmarked block (§6)
 markstay restamp FILE... [-w]       # refresh hashes that drifted (§8)
 markstay repair  FILE... [-w]       # mint fresh ids for duplicate ids (§7)
@@ -49,6 +50,43 @@ receipt (`-> N hash-drift findings hidden (--show-drift to list)`); pass
 `warn` in the `lintDocument` / `lintDiff` return values and in `--json` (which is
 byte-identical with and without `--show-drift`), so caches and re-embed triggers
 that treat a stale hash as fatal read those, unaffected.
+
+### Gating commits (husky + lint-staged)
+
+`check-staged` is the verb a hook wants. Every other verb works on files; this one
+works on a commit, because catching a dropped stay means diffing against the same
+document *before* the edit, and only git knows what that was.
+
+```jsonc
+// package.json
+{
+  "lint-staged": {
+    "*.{md,markdown}": "markstay check-staged"
+  }
+}
+```
+
+```sh
+# .husky/pre-commit
+npx lint-staged
+```
+
+It exits non-zero when the staged commit drops, duplicates, or relocates a stay,
+and stays quiet otherwise: a commit that only edits stamped blocks in place or
+mints new ids prints nothing, so the channel keeps meaning something. `--json` for
+machine output, `--show-drift` to see the quiet findings anyway.
+
+lint-staged appends the matched filenames, which scope the *report*. The commit is
+still read whole, because a renamed document's baseline lives in a deleted path and
+lint-staged never passes one.
+
+**The baseline is resolved by stay id, not by filename.** git's rename detection is
+content-similarity based, and similarity is anti-correlated with this failure mode:
+the more a rewrite destroys, the more stays it can drop *and* the less git sees a
+rename. A measured real case scored 2% similarity, so git recorded delete + create
+and a path-keyed baseline found nothing to compare against. A surviving stay id is
+the stronger signal. An id that moved to another document in the same commit is
+reported as a move rather than a loss, so reorganising documents does not block.
 
 ```sh
 $ printf 'Hello world.\n' > doc.md && markstay stamp doc.md
