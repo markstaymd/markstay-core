@@ -1,0 +1,71 @@
+# Publish `markstay` to npm via Trusted Publishing (OIDC, no stored token).
+#
+# Same shape as markstay-py's PyPI workflow: cut a GitHub Release and the registry
+# gets it. No `npm login`, no automation token in a secret, nothing publishable
+# sitting on a laptop.
+#
+# Setup (one-time, in the npmjs.com UI as the `markstay` account):
+#   the package -> Settings -> Trusted Publisher -> GitHub Actions:
+#     organization or user:  markstaymd
+#     repository:            markstay-core
+#     workflow filename:     publish.yml
+#     environment:           npm          (must match `environment:` below)
+#     allowed actions:       npm publish
+#
+# Release flow: cut a GitHub Release `vX.Y.Z` on markstaymd/markstay-core. The job
+# runs the suite on 22 + 24, checks the tag against package.json, then publishes.
+# Provenance is attached automatically (public repo + public package + OIDC), so
+# no --provenance flag.
+
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ["22", "24"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node-version }}
+      # `npm install`, not `npm ci`: there is no committed lockfile.
+      - run: npm install
+      - run: npm test
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      id-token: write   # the OIDC token that replaces the stored credential
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      # Trusted publishing needs npm >= 11.5.1, which is newer than the CLI some
+      # Node images bundle. Pin it rather than inherit whatever ships.
+      - run: npm install -g npm@latest
+      - name: tag matches package.json
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "release tag $tag does not match package.json $pkg" >&2
+            exit 1
+          fi
+      - run: npm install
+      - run: npm publish --access public
