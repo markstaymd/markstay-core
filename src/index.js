@@ -42,3 +42,8 @@ export {
   DEFAULT_THRESHOLD,
   DEFAULT_MARGIN,
 } from "./resolve.js";
+export {
+  PRESERVE_INSTRUCTION,
+  PRESERVE_RETURN_ONLY,
+  preserveWrap,
+} from "./preserve.js";

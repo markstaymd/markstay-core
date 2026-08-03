@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { lintDocument, lintDiff } from "../src/index.js";
+import { lintDocument, lintDiff, PRESERVE_INSTRUCTION, preserveWrap } from "../src/index.js";
 
 const CLI = fileURLToPath(new URL("../bin/cli.js", import.meta.url));
 
@@ -25,6 +25,16 @@ function runCli(args) {
     return execFileSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
   } catch (e) {
     return e.stdout ?? "";
+  }
+}
+
+// Run the CLI for its exit status only (2 is the shared argument-error code).
+function exitCode(args) {
+  try {
+    execFileSync(process.execPath, [CLI, ...args], { encoding: "utf8", stdio: "pipe" });
+    return 0;
+  } catch (e) {
+    return e.status;
   }
 }
 
@@ -109,4 +119,54 @@ test("guardrail: HASH_DRIFT stays warn in the structured return tuples", () => {
     (f) => f.code === "HASH_DRIFT",
   );
   assert.ok(diff.length && diff.every((f) => f.level === "warn"));
+});
+
+// --- preserve (SPEC.md §11) -------------------------------------------------
+//
+// The verb the eval says matters most: an instructed rewrite keeps ~96-100% of
+// markers against ~5% for a naive one. Its CLI contract is deliberately dull, no
+// parsing and no git, so these pin the shape rather than the content (the text
+// itself is held byte-identical to Python and Rust by the conformance corpus).
+
+test("preserve prints the instruction verbatim and exits 0", () => {
+  assert.equal(runCli(["preserve"]), PRESERVE_INSTRUCTION + "\n");
+});
+
+test("preserve --wrap composes the measured prompt shape", () => {
+  withTmp(["# Title\n\nA paragraph.\n"], (doc) => {
+    const out = runCli(["preserve", "--wrap", doc, "--task", "Tighten it."]);
+    assert.equal(out, preserveWrap("# Title\n\nA paragraph.\n", "Tighten it.") + "\n");
+    // task first, then the instruction, then the document behind the rule
+    assert.ok(out.indexOf("Tighten it.") < out.indexOf(PRESERVE_INSTRUCTION));
+    assert.ok(out.indexOf(PRESERVE_INSTRUCTION) < out.indexOf("A paragraph."));
+  });
+});
+
+test("preserve rejects a bare FILE and a --task without --wrap", () => {
+  // A bare FILE is the plausible mistake (every other verb takes one), so it has
+  // to fail loudly rather than silently print the instruction and ignore the doc.
+  assert.equal(exitCode(["preserve", "doc.md"]), 2);
+  assert.equal(exitCode(["preserve", "--task", "Tighten it."]), 2);
+});
+
+test("a value flag in final position is an error, not an absent flag", () => {
+  // Storing undefined here reads downstream as "flag absent", so the CLI would
+  // run a different command at exit 0 while Python and Rust both exit 2.
+  assert.equal(exitCode(["preserve", "--wrap"]), 2);
+  assert.equal(exitCode(["preserve", "--task"]), 2);
+  assert.equal(exitCode(["lint", "--before"]), 2);
+});
+
+test("preserve rejects input that is not valid UTF-8", () => {
+  // Node substitutes U+FFFD and Python surrogate-escapes, so a lenient read is
+  // precisely how three implementations stop emitting the same bytes. All three
+  // exit 2 instead.
+  const dir = mkdtempSync(join(tmpdir(), "markstay-cli-"));
+  try {
+    const p = join(dir, "bad.md");
+    writeFileSync(p, Buffer.from([0x42, 0xff, 0x0a]));
+    assert.equal(exitCode(["preserve", "--wrap", p]), 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

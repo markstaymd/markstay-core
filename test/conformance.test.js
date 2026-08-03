@@ -15,6 +15,7 @@ import {
   quoteRatio, bodyScore, contextBonus, bestMatch,
   buildAnchors, resolve as resolveAnchors,
   stamp, restamp, repairDuplicates, mintId,
+  PRESERVE_INSTRUCTION, PRESERVE_RETURN_ONLY, preserveWrap,
 } from "../src/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -176,10 +177,22 @@ function vStamp(v) {
   return { ok: approx(got, v.expected), got };
 }
 
+// §11 preservation-instruction vectors. The instruction text ships as a constant
+// in this package (an installed package has no corpus on disk), so this is what
+// holds that copy byte-identical to the Python and Rust ones.
+function vPreserve(v) {
+  let got;
+  if (v.fn === "instruction") got = PRESERVE_INSTRUCTION;
+  else if (v.fn === "return_only") got = PRESERVE_RETURN_ONLY;
+  else if (v.fn === "wrap") got = preserveWrap(v.doc, v.task ?? null);
+  else return { ok: false, got: `unknown preserve fn: ${v.fn}` };
+  return { ok: approx(got, v.expected), got };
+}
+
 const VERIFIERS = {
   hash: vHash, markers: vMarkers, parse: vParse, lint: vLint,
   diff: vDiff, seqmatch: vSeqmatch, score: vScore, resolve: vResolve,
-  stamp: vStamp, mint: vMint,
+  stamp: vStamp, mint: vMint, preserve: vPreserve,
 };
 
 // --- drive the corpus ------------------------------------------------------
@@ -203,6 +216,16 @@ function corpusFiles() {
 
 const files = corpusFiles();
 assert.ok(files.length > 0, "no corpus files found under conformance/spec or conformance/gen");
+
+// A verifier with no vectors is a check that silently is not running, and the
+// hundreds of unrelated vectors keep the suite green while it does nothing. That
+// is the failure class this project exists to catch, so a category missing from
+// the corpus fails here rather than passing quietly.
+test("every verifier has vectors in the corpus", () => {
+  const seen = new Set(files.map(({ path }) => JSON.parse(readFileSync(path, "utf8")).category));
+  const missing = Object.keys(VERIFIERS).filter((c) => !seen.has(c)).sort();
+  assert.deepEqual(missing, [], `verifiers with no vectors: ${missing.join(", ")}`);
+});
 
 for (const { tier, path } of files) {
   const data = JSON.parse(readFileSync(path, "utf8"));

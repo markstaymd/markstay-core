@@ -27,9 +27,40 @@ npm install -g markstay     # or use the `markstay` CLI via npx
 
 Requires Node >= 22 (uses `node:crypto`). Zero runtime dependencies.
 
+## Keeping stays alive through an agent's edit (start here)
+
+Almost every stay that goes missing goes missing the same way: a model rewrote the
+document and did not know the markers were load-bearing. The eval measured both
+halves of the fix, and they are not close , a naive "clean this up" rewrite keeps
+about **5%** of markers, the same rewrite carrying the SPEC.md §11 instruction keeps
+**~96-100%**, across five models and three vendors. That outweighs model tier.
+
+```sh
+markstay preserve                  # the §11 instruction, ready to paste into
+                                   #   AGENTS.md / CLAUDE.md / a system prompt
+markstay preserve --wrap DOC.md    # the instruction wrapped around a document,
+                                   #   as a complete editing prompt
+markstay preserve --wrap DOC.md --task "Rewrite this to be clearer."
+```
+
+```js
+import { PRESERVE_INSTRUCTION, preserveWrap } from "markstay";
+
+PRESERVE_INSTRUCTION;                 // the §11 contract, worded for an agent
+preserveWrap(doc, "Tighten it.");     // the prompt shape the eval measured
+```
+
+The instruction is byte-identical in the PyPI and crates.io packages, held there by
+the shared conformance corpus rather than by convention.
+
+Everything below is the **backstop**: it catches loss after the fact, it does not
+prevent it. Ship the instruction first.
+
 ## CLI
 
 ```sh
+markstay preserve                   # the §11 instruction for an editing agent (§11)
+markstay preserve --wrap DOC.md     # that instruction + the doc, as a prompt
 markstay lint    FILE...            # well-formedness + intra-doc checks (§7/§8/§10)
 markstay lint    --before OLD NEW   # regeneration diff (§11)
 markstay check-staged [FILE...]     # lint the staged commit vs its baseline (§11)
@@ -148,6 +179,10 @@ Write side (string-level, parser-free):
 Every minting path funnels through an injectable id factory, so the write helpers
 are deterministic under test.
 
+Prevention side (§11): `PRESERVE_INSTRUCTION`, `PRESERVE_RETURN_ONLY`,
+`preserveWrap(doc, task?)`. Pure text composition , no parsing, no I/O , and
+byte-identical to the PyPI and crates.io packages, asserted by the corpus.
+
 ## Running the tests
 
 Requires Node >= 22 (uses `node:test` and `node:crypto`; no install step).
@@ -167,7 +202,7 @@ The full JS suite is **336 tests** (292 conformance assertions + 23 unit ports +
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **276 vectors** across two tiers:
+reference. **303 vectors** across two tiers:
 
 | category | spec | gen | covers |
 |----------|-----:|----:|--------|
@@ -179,7 +214,16 @@ reference. **276 vectors** across two tiers:
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
 | score    | 12   | 17  | §9 wrappers: body score, context bonus, best match, ASCII fold |
 | resolve  | 4    | 5   | §9.1 ladder + margin guard |
-| **total**| **62** | **214** | |
+| mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
+| stamp    | 0    | 16  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair |
+| preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
+| **total**| **73** | **230** | |
+
+The `preserve` row is the odd one and deliberately so: it holds plain prose rather
+than a computation. Each implementation carries its own copy of the §11 instruction
+(an installed package has no corpus on disk), and this category is what keeps the
+three copies byte-identical. A project whose whole claim is catching silent drift
+should not let its own instruction text drift silently.
 
 - **`spec/`** , hand-authored from the spec prose, asserting what the *words*
   require. These are authority; a `spec/` vector the reference fails is a

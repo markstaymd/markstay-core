@@ -2,6 +2,8 @@
 // markstay CLI (npm `markstay`). Subcommand grammar so the write verbs read
 // naturally:
 //
+//   markstay preserve                   print the §11 instruction for an agent
+//   markstay preserve --wrap DOC.md     that instruction + the doc, as a prompt
 //   markstay lint    FILE...            well-formedness + intra-doc checks
 //   markstay lint    --before OLD NEW   regeneration diff (SPEC.md §11)
 //   markstay stamp   FILE... [-w]       mint ids for unmarked blocks (§6)
@@ -30,12 +32,18 @@ import {
   stamp,
   restamp,
   repairDuplicates,
+  PRESERVE_INSTRUCTION,
+  preserveWrap,
 } from "../src/index.js";
 import { idIndex } from "../src/lint.js";
 
 const USAGE = `markstay <command> [options]
 
 Commands:
+  preserve                          print the §11 instruction that keeps markers
+                                    alive through an agent's edit
+  preserve --wrap DOC.md            that instruction wrapped around a document,
+                                    as a ready editing prompt ('-' reads stdin)
   lint     FILE...                  lint for well-formedness + intra-doc invariants
   lint     --before OLD.md NEW.md   regeneration diff between two versions
   check-staged [FILE...]            lint the staged commit against its baseline
@@ -56,7 +64,13 @@ Options:
       --no-hash      do not write a hash attribute (stamp)
       --hash-length N  hex-prefix length for written hashes (stamp/restamp)
       --add-missing  add a hash to markers that lack one (restamp)
+      --wrap FILE    wrap this document into an editing prompt (preserve)
+      --task TEXT    edit task to prepend to a --wrap prompt (preserve)
   -h, --help         show this help
+
+preserve is listed first because measurement puts it first: an instructed rewrite
+keeps ~96-100% of markers against ~5% for a naive one, so the instruction prevents
+loss and every check below only catches it.
 `;
 
 function fail(msg) {
@@ -76,11 +90,33 @@ function parseArgs(rest, valueFlags) {
     else if (a === "--mdx") flags.mdx = true;
     else if (a === "--no-hash") flags.noHash = true;
     else if (a === "--add-missing") flags.addMissing = true;
-    else if (valueFlags.has(a)) flags[a.replace(/^--/, "")] = rest[++i];
-    else if (a.startsWith("-") && a !== "-") fail(`unknown option ${a}`);
+    else if (valueFlags.has(a)) {
+      // A value flag in final position would otherwise store `undefined`, which
+      // reads downstream as "flag absent" and silently runs a different command.
+      if (i + 1 >= rest.length) fail(`${a} needs a value`);
+      flags[a.replace(/^--/, "")] = rest[++i];
+    } else if (a.startsWith("-") && a !== "-") fail(`unknown option ${a}`);
     else files.push(a);
   }
   return { files, flags };
+}
+
+// Read a document as strict UTF-8 (a path, or fd 0 for stdin). Invalid input is
+// rejected rather than guessed at: Node substitutes U+FFFD and Python
+// surrogate-escapes, so a lenient read is precisely how three implementations
+// stop emitting the same bytes for the same document.
+function readDoc(src) {
+  let buf;
+  try {
+    buf = readFileSync(src);
+  } catch (e) {
+    fail(e.message);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+  } catch {
+    fail(`${src === 0 ? "stdin" : src}: not valid UTF-8`);
+  }
 }
 
 // Human render. HASH_DRIFT is the dominant, non-actionable line in normal use
@@ -104,6 +140,25 @@ function renderText(label, findings, showDrift = false) {
   const n = (lvl) => findings.filter((x) => x.level === lvl).length;
   out.push(`  -> ${n("error")} error, ${n("warn")} warn, ${n("info")} info`);
   return out.join("\n");
+}
+
+// The §11 instruction, on its own or wrapped around a document. No parsing, no
+// git, no file writes: this verb only ever composes text, which is why it costs
+// the same in all three ecosystems and lands the half of §11 that measurement
+// says prevents loss rather than catches it.
+function cmdPreserve(rest) {
+  const { files, flags } = parseArgs(rest, new Set(["--wrap", "--task"]));
+  if (files.length) fail(`preserve takes no FILE arguments (use --wrap ${files[0]})`);
+  if (flags.task !== undefined && flags.wrap === undefined) {
+    fail("--task only applies with --wrap");
+  }
+  if (flags.wrap === undefined) {
+    process.stdout.write(PRESERVE_INSTRUCTION + "\n");
+    return 0;
+  }
+  const doc = readDoc(flags.wrap === "-" ? 0 : flags.wrap);
+  process.stdout.write(preserveWrap(doc, flags.task ?? null) + "\n");
+  return 0;
 }
 
 function cmdLint(rest) {
@@ -421,6 +476,8 @@ function main(argv) {
     return cmd ? 0 : 2;
   }
   switch (cmd) {
+    case "preserve":
+      return cmdPreserve(rest);
     case "lint":
       return cmdLint(rest);
     case "check-staged":

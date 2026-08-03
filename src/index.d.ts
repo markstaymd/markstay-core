@@ -270,3 +270,9 @@ export function resolveOverBlocks(
   afterBlocks: Block[],
   opts?: ResolveOverBlocksOptions
 ): Record<string, Resolution>;
+
+/** The SPEC.md §11 preservation instruction, worded for an editing agent. */
+export const PRESERVE_INSTRUCTION: string;
+/** The return-format line the eval's measured prompt shape appends. */
+export const PRESERVE_RETURN_ONLY: string;
+export function preserveWrap(doc: string, task?: string | null): string;
