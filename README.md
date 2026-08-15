@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.1-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.2-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.1), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.2), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -145,10 +145,11 @@ src/
   resolve.js   §9.1 resolution ladder (MARKER -> HASH -> QUOTE -> DETACHED)
   id.js        §6 opaque id minting (injectable byte source)
   stamp.js     §3/§4/§6/§7/§8 write path: formatMarker, stamp, restamp, repair
+  staged.js    git-independent commit checking + stay-id baseline pairing (§11)
   text.js      shared ASCII whitespace + ASCII case-fold helpers (§8/§5/§9)
   index.js     public API
 bin/
-  cli.js       the `markstay` CLI (lint / stamp / restamp / repair)
+  cli.js       the `markstay` CLI (preserve / lint / check / write verbs)
 test/
   conformance.test.js   runs the shared corpus (conformance/)
   unit.test.js          behavioral ports of the Python reference's lint/attach tests
@@ -183,6 +184,12 @@ Prevention side (§11): `PRESERVE_INSTRUCTION`, `PRESERVE_RETURN_ONLY`,
 `preserveWrap(doc, task?)`. Pure text composition , no parsing, no I/O , and
 byte-identical to the PyPI and crates.io packages, asserted by the corpus.
 
+Commit-check side (§11): `checkEntries(entries, { scope? })` takes materialized
+commit entries (`status`, `src`, `dst`, `before`, `after`) and returns baseline
+pairings, findings, and non-blocking move/deletion notes. The CLI supplies those
+entries from Git; the pure function is held in sync across languages by the
+commit-shaped `check` corpus category.
+
 ## Running the tests
 
 Requires Node >= 22 (uses `node:test` and `node:crypto`; no install step).
@@ -196,19 +203,19 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The full JS suite is **336 tests** (292 conformance assertions + 23 unit ports +
-21 write-path tests), exit 0.
+The shared corpus contributes 332 cross-language assertions; CLI and unit tests
+cover the Git adapter, rendering, and write-path invariants around it.
 
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **303 vectors** across two tiers:
+reference. **332 vectors** across two tiers:
 
 | category | spec | gen | covers |
 |----------|-----:|----:|--------|
 | hash     | 10   | 14  | §8 ASCII normalization + SHA-256 + truncation (incl. NBSP kept) |
 | markers  | 9    | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex |
-| parse    | 5    | 9   | §5 blank-line segmentation + marker attachment |
+| parse    | 21   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion and the thematic-break spans it must not eat |
 | lint     | 7    | 8   | §7/§8/§10 findings (ordered) |
 | diff     | 6    | 6   | §11 regeneration diff (ordered) |
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
@@ -217,7 +224,8 @@ reference. **303 vectors** across two tiers:
 | mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
 | stamp    | 0    | 16  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair |
 | preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
-| **total**| **73** | **230** | |
+| check    | 13   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
+| **total**| **102** | **230** | |
 
 The `preserve` row is the odd one and deliberately so: it holds plain prose rather
 than a computation. Each implementation carries its own copy of the §11 instruction
@@ -250,6 +258,31 @@ change to either implementation that breaks agreement fails one of them.
   whitespace or case-fold table (`src/text.js` is the single definition).
   Non-ASCII characters compare unchanged; a `spec/` vector (`É` vs `é`) pins that
   Unicode casefold is *not* used.
+- **Leading YAML frontmatter is metadata, not a block (§5.3):** it is skipped before
+  segmentation, so it is never a block, never stamped, and never hashed , a
+  metadata-only edit (`status: draft` -> `status: done`) must not read as a content
+  edit. Recognition is conservative, because `---` is also a thematic break and a
+  setext underline: a span counts only when line 1 is exactly `---`, a later line is
+  exactly `---` or `...`, the payload between them is non-empty with no blank line,
+  and at least one payload line is unambiguously YAML (a `key:` or a `- item`). A
+  YAML *comment* does not count, since `# x` is also an ATX heading. "Unambiguously
+  YAML" is judged with ASCII whitespace, as everywhere else in the spec (§8/§9): the
+  runtimes' own Unicode whitespace sets disagree with each other, and a rule that
+  DELETES a span must not vary by implementation. The conditions confine the
+  ambiguity rather than removing it, and the rule does not pretend otherwise: a
+  blank-free payload that reads as YAML is *also* ordinary Markdown, whether it is a
+  sequence (`---` / `- Keep this` / `---`, a list between two thematic breaks) or a
+  mapping (`---` / `title: v` / `---`, a setext heading under one). Both are accepted
+  and their content is excluded. **Frontmatter wins**, the same call every mainstream
+  Markdown site generator makes on the same bytes. A document that fails any of the
+  four conditions (no opening `---`, no closing fence, a blank line in the payload,
+  no payload line that reads as YAML) falls through to ordinary Markdown, where the
+  worst case is a spurious block and a stray hash-drift warning. A marker an older version stamped onto
+  frontmatter usually raises `ORPHAN_MARKER`, and deleting that one marker is the
+  whole migration. **Lint before deleting**: with no blank line between the marker
+  and the content below it, blank-line segmentation reads one run and binds the
+  marker to that content, so it is live rather than orphaned and deleting it drops
+  a working id.
 - **Positional id (§4):** the id is the first token after `stay:` (`^`-anchored);
   a marker whose first token is a bare `k=v` is malformed even if a later
   `stay:ID` appears in the body, matching the Python reference's `ID_RE.match`.

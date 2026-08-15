@@ -1,4 +1,4 @@
-// Type declarations for the markstay JS reference implementation (SPEC.md v1.1,
+// Type declarations for the markstay JS reference implementation (SPEC.md v1.2,
 // parser-free core). Hand-written to match the runtime shapes the modules in this
 // directory actually produce; keep in sync with index.js on any surface change.
 
@@ -99,6 +99,33 @@ export type Chunk = [number, string];
  * CommonMark mode (§5.2) is provided by the remark-stay adapter, not the core.
  */
 export type ParseMode = "blank-line";
+
+/** One Git-independent input to `checkEntries`. */
+export interface CommitEntry {
+  status: string;
+  src: string;
+  dst: string;
+  before: string | null;
+  after: string | null;
+}
+
+export interface BaselinePairing {
+  path: string;
+  baseline: string | null;
+}
+
+export type CheckReport = [label: string, findings: Finding[]];
+
+export interface StagedCheck {
+  reports: CheckReport[];
+  notes: string[];
+  pairings: BaselinePairing[];
+  hasErrors: boolean;
+}
+
+export interface CheckEntriesOptions {
+  scope?: string[];
+}
 
 // --- hashing (hash.js, SPEC.md §8) ---
 
@@ -276,3 +303,11 @@ export const PRESERVE_INSTRUCTION: string;
 /** The return-format line the eval's measured prompt shape appends. */
 export const PRESERVE_RETURN_ONLY: string;
 export function preserveWrap(doc: string, task?: string | null): string;
+
+// --- commit checking (staged.js, SPEC.md §11) ---
+
+export function isMarkdown(path: string): boolean;
+export function checkEntries(
+  entries: CommitEntry[],
+  opts?: CheckEntriesOptions
+): StagedCheck;

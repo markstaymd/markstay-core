@@ -16,6 +16,7 @@ import {
   buildAnchors, resolve as resolveAnchors,
   stamp, restamp, repairDuplicates, mintId,
   PRESERVE_INSTRUCTION, PRESERVE_RETURN_ONLY, preserveWrap,
+  checkEntries,
 } from "../src/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -189,10 +190,25 @@ function vPreserve(v) {
   return { ok: approx(got, v.expected), got };
 }
 
+// Commit-shaped baseline pairing and findings, with Git already materialized.
+function vCheck(v) {
+  const result = checkEntries(v.entries, { scope: v.scope ?? [] });
+  const got = {
+    pairings: result.pairings,
+    reports: result.reports.map(([label, findings]) => ({
+      label,
+      findings: sortFindings(findings).map((f) => findingDict(f, true)),
+    })),
+    notes: result.notes,
+    hasErrors: result.hasErrors,
+  };
+  return { ok: approx(got, v.expected), got };
+}
+
 const VERIFIERS = {
   hash: vHash, markers: vMarkers, parse: vParse, lint: vLint,
   diff: vDiff, seqmatch: vSeqmatch, score: vScore, resolve: vResolve,
-  stamp: vStamp, mint: vMint, preserve: vPreserve,
+  stamp: vStamp, mint: vMint, preserve: vPreserve, check: vCheck,
 };
 
 // --- drive the corpus ------------------------------------------------------

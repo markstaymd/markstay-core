@@ -2,14 +2,15 @@
 // Port of `parse_document` (blank-line mode) from linter/markstay_lint.py.
 
 import { findMarkers, stripMarkers } from "./markers.js";
-import { segmentBlankLine } from "./segment.js";
+import { blankFrontmatter, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
 
 /**
  * Parse into content blocks with their attached markers, blank-line mode
- * (SPEC.md §5 baseline). A chunk that is only markers attaches to the previous
- * content block; a marker-only chunk with no preceding content block is an
- * orphan (index -1).
+ * (SPEC.md §5 baseline). A leading YAML frontmatter block is metadata rather than
+ * content and is skipped before segmentation (see `blankFrontmatter`). A chunk
+ * that is only markers attaches to the previous content block; a marker-only
+ * chunk with no preceding content block is an orphan (index -1).
  *
  * Returns block objects: { content, markers, line, index }. `index` is the
  * 0-based content-block index; -1 marks an orphan marker chunk.
@@ -24,7 +25,7 @@ export function parseDocument(md, mode = "blank-line") {
         `(JS v1 implements 'blank-line' only; CommonMark §5.2 is deferred)`
     );
   }
-  const text = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const text = blankFrontmatter(md.replace(/\r\n/g, "\n").replace(/\r/g, "\n"));
   const chunks = segmentBlankLine(text);
 
   const blocks = [];

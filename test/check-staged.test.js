@@ -10,7 +10,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import {
+  mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,6 +98,18 @@ test("a pure rename keeps every stay and passes", () => {
   });
 });
 
+test("a rename out of Markdown leaves a non-blocking tracking note", () => {
+  withRepo((repo, write) => {
+    write("notes.md", doc(2));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+    git(repo, "mv", "notes.md", "notes.txt");
+    const { code, out } = check(repo);
+    assert.equal(code, 0, out);
+    assert.ok(out.includes("renamed to notes.txt, leaving Markdown tracking"), out);
+  });
+});
+
 test("a stay moved between documents is a note, not a block", () => {
   withRepo((repo, write) => {
     const moved = "## Section 2\n\nBody text for section 2, long enough to hash.\n"
@@ -146,6 +160,28 @@ test("filename arguments scope the report, not the baseline search", () => {
     assert.equal(scoped.code, 1, scoped.out);
     assert.ok(scoped.out.includes("DROPPED_ID"), scoped.out);
     assert.ok(!scoped.out.includes("other.md"), scoped.out);
+  });
+});
+
+test("a symlinked absolute scope path still blocks a dropped stay", {
+  skip: process.platform === "win32",
+}, () => {
+  withRepo((repo, write) => {
+    write("a.md", doc(3));
+    git(repo, "add", "-A");
+    git(repo, "commit", "-qm", "init");
+    write("a.md", doc(1));
+    git(repo, "add", "-A");
+
+    const alias = `${repo}-alias`;
+    symlinkSync(repo, alias);
+    try {
+      const scoped = check(repo, [join(alias, "a.md")]);
+      assert.equal(scoped.code, 1, scoped.out);
+      assert.ok(scoped.out.includes("DROPPED_ID"), scoped.out);
+    } finally {
+      unlinkSync(alias);
+    }
   });
 });
 
@@ -259,5 +295,15 @@ test("check-worktree is quiet on a stay-preserving edit", () => {
     const { code, out } = checkWorktree(repo);
     assert.equal(code, 0, out);
     assert.equal(out.trim(), "", out);
+  });
+});
+
+test("check-worktree sees indexed files before the first commit", () => {
+  withRepo((repo, write) => {
+    write("broken.md", "Body.\n<!-- stay: -->\n");
+    git(repo, "add", "broken.md");
+    const { code, out } = checkWorktree(repo);
+    assert.equal(code, 1, out);
+    assert.ok(out.includes("MALFORMED_MARKER"), out);
   });
 });

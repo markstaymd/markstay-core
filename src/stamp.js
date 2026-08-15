@@ -10,7 +10,7 @@
 import { bodyHash } from "./hash.js";
 import { parseDocument } from "./parse.js";
 import { findMarkers, stripMarkers, rewriteMarkers } from "./markers.js";
-import { segmentBlankLine } from "./segment.js";
+import { blankFrontmatter, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
 import { mintId, ID_CHARSET } from "./id.js";
 
@@ -132,10 +132,14 @@ export function stamp(md, opts = {}) {
   const nextId = uniqueMinter(used, newId ?? (() => mintId({ length, alphabet, random })));
 
   // Walk blank-line chunks, mirroring parse.js attachment, but keep each content
-  // block's last source line so a marker can be inserted right after it.
+  // block's last source line so a marker can be inserted right after it. Leading
+  // frontmatter is blanked first, exactly as parseDocument does it, so the write
+  // path never mints an id for document metadata , a marker stamped there would
+  // have no block to attach to and lint would (correctly) call it an orphan.
+  // Blanking is line-for-line, so the insertion points below still index `lines`.
   const needsStamp = []; // { lastLine0, content }
   let current = null;
-  for (const [startLine, chunk] of segmentBlankLine(norm)) {
+  for (const [startLine, chunk] of segmentBlankLine(blankFrontmatter(norm))) {
     const content = asciiTrim(stripMarkers(chunk));
     const hasId = findMarkers(chunk).some((mk) => mk.id && !mk.malformed);
     if (content !== "") {

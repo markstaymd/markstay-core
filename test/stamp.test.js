@@ -158,6 +158,47 @@ test("stamp: hashLength controls the written precision", () => {
   assert.equal(mk.hash, bodyHash("Body.", 4));
 });
 
+// --- stamp vs leading frontmatter (SPEC.md §5) ---
+
+const FM_DOC = "---\nstatus: active\nowner: tim\n---\n\n# Title\n\nBody paragraph.\n";
+
+test("stamp: leaves frontmatter unmarked and lints clean", () => {
+  // The write path segments through the same frontmatter skip as the read path. A
+  // stamper that missed it would mint an id for the metadata, and the linter would
+  // then (correctly) report ORPHAN_MARKER on the marker it had just written.
+  const { text, minted } = stamp(FM_DOC, { newId: counter() });
+  assert.equal(minted.length, 2); // the heading and the paragraph, not the metadata
+  assert.ok(text.startsWith("---\nstatus: active\nowner: tim\n---\n"));
+  assert.deepEqual(errorCodes(text), []);
+});
+
+test("stamp: the first marker lands on the line after the heading", () => {
+  // Blanking is line-for-line, so insertion points still index the source.
+  const lines = stamp(FM_DOC, { newId: counter() }).text.split("\n");
+  assert.equal(lines[5], "# Title");
+  assert.ok(lines[6].startsWith("<!-- stay:id00"));
+});
+
+test("stamp: a metadata edit does not drift a stamped hash", () => {
+  const stamped = stamp(FM_DOC, { newId: counter() }).text;
+  const edited = stamped.replace("status: active", "status: complete");
+  assert.deepEqual(lintDocument(edited).findings, []);
+});
+
+test("stamp: a leading thematic break is content and still gets an id", () => {
+  const { text, minted } = stamp("---\n\nBody.\n", { newId: counter() });
+  assert.equal(minted.length, 2);
+  assert.deepEqual(errorCodes(text), []);
+});
+
+test("restamp: frontmatter carries no hash to refresh", () => {
+  const stamped = stamp(FM_DOC, { newId: counter() }).text;
+  const edited = stamped.replace("owner: tim", "owner: someone");
+  const { text, refreshed } = restamp(edited);
+  assert.deepEqual(refreshed, []);
+  assert.equal(text, edited);
+});
+
 // --- restamp (§8) ---
 
 test("restamp: refreshes a drifted hash and then lints clean", () => {

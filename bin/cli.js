@@ -19,14 +19,12 @@
 // subcommand because it also carries the write verbs; the grammars are meant to
 // converge on this subcommand form (see the umbrella adoption plan).
 
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { relative, resolve as resolvePath } from "node:path";
+import { isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import {
   lintDocument,
   lintDiff,
-  parseDocument,
   sortFindings,
   hasErrors,
   stamp,
@@ -34,8 +32,9 @@ import {
   repairDuplicates,
   PRESERVE_INSTRUCTION,
   preserveWrap,
+  checkEntries,
+  isMarkdown,
 } from "../src/index.js";
-import { idIndex } from "../src/lint.js";
 
 const USAGE = `markstay <command> [options]
 
@@ -198,8 +197,6 @@ function cmdLint(rest) {
 // An id that moved to another document in the same commit is reported as a move,
 // not a loss, so reorganising documents does not block a commit.
 
-const MD_RE = /\.(md|markdown)$/;
-
 function git(args, { allowFail = false } = {}) {
   try {
     return execFileSync("git", args, {
@@ -213,14 +210,6 @@ function git(args, { allowFail = false } = {}) {
     if (allowFail) return null;
     throw e;
   }
-}
-
-function isMd(path) {
-  // `.markstay/` holds a vendored linter and a PRESERVE.md that demonstrates the
-  // marker form twice; linting it would report a duplicate id that is not the
-  // repo's problem.
-  if (path === ".markstay" || path.startsWith(".markstay/")) return false;
-  return MD_RE.test(path);
 }
 
 /** Staged changes as [status, src, dst]. `-z` name-status: R/C carry two paths. */
@@ -249,9 +238,16 @@ function stagedEntries() {
  * that rewrites a document under a new name leaves a deleted path and an untracked
  * one, which is exactly the rename case. */
 function worktreeEntries() {
-  const raw = git(["diff", "HEAD", "--name-status", "-z", "--find-renames"], {
+  let raw = git(["diff", "HEAD", "--name-status", "-z", "--find-renames"], {
     allowFail: true,
   });
+  if (raw == null) {
+    // An unborn repository has no HEAD. Every tracked path is necessarily an
+    // index addition, and afterText still reads its current worktree contents.
+    raw = git(["diff", "--cached", "--name-status", "-z", "--find-renames"], {
+      allowFail: true,
+    });
+  }
   const fields = (raw ?? "").split("\0");
   const out = [];
   for (let i = 0; i < fields.length && fields[i]; ) {
@@ -271,9 +267,6 @@ function worktreeEntries() {
 }
 
 const headText = (path) => git(["show", `HEAD:${path}`], { allowFail: true });
-const idsOf = (text) =>
-  text == null ? new Set() : new Set(idIndex(parseDocument(text)).keys());
-
 function cmdCheckStaged(rest) {
   return runCheck("check-staged", rest, (top) => ({
     entries: stagedEntries(),
@@ -296,6 +289,24 @@ function cmdCheckWorktree(rest) {
   }));
 }
 
+function repoRelative(path, top) {
+  const canonicalTop = realpathSync(top);
+  const absolute = resolvePath(process.cwd(), path);
+  let canonical = absolute;
+  try {
+    canonical = realpathSync(absolute);
+  } catch {
+    // A deleted or not-yet-created scoped path cannot be canonicalized. Keep its
+    // lexical form, but reject it below if it does not live under the real root.
+  }
+  const scoped = relative(canonicalTop, canonical);
+  const normalized = scoped.split("\\").join("/");
+  if (isAbsolute(scoped) || normalized === ".." || normalized.startsWith("../")) {
+    fail(`scoped path is outside the git work tree: ${path}`);
+  }
+  return normalized;
+}
+
 function runCheck(verb, rest, source) {
   const { files, flags } = parseArgs(rest, new Set());
   const root = git(["rev-parse", "--show-toplevel"], { allowFail: true });
@@ -307,86 +318,26 @@ function runCheck(verb, rest, source) {
   // whole, because a deleted file is where a renamed document's baseline lives and
   // lint-staged never passes one.
   const scope = new Set(
-    files.map((f) => relative(top, resolvePath(process.cwd(), f)).split("\\").join("/")),
+    files.map((f) => repoRelative(f, top)),
   );
 
   const { entries, afterText } = source(top);
-  const changed = entries.filter(([st, , dst]) => st !== "D" && isMd(dst));
-  const deleted = entries.filter(([st, src]) => st === "D" && isMd(src)).map(([, src]) => src);
-  if (!changed.length && !deleted.length) return 0;
-
-  const stagedText = new Map(changed.map(([, , dst]) => [dst, afterText(dst)]));
-  const stagedIds = new Map([...stagedText].map(([p, t]) => [p, idsOf(t)]));
-  const committedIds = new Set();
-  for (const s of stagedIds.values()) for (const id of s) committedIds.add(id);
-
-  const deletedIds = new Map(deleted.map((p) => [p, idsOf(headText(p))]));
-  const claimed = new Set();
-
-  function baselineFor(status, src, dst) {
-    if (status === "R") {
-      const t = headText(src);
-      if (t != null) return [t, src];
-    } else if (status !== "C") {
-      const t = headText(dst);
-      if (t != null) return [t, dst];
-    }
-    // Nothing at this path in HEAD: added, or a rename git scored as delete +
-    // create. Pair on shared stay ids instead of on the filename.
-    const mine = stagedIds.get(dst) ?? new Set();
-    let best = null;
-    let bestN = 0;
-    for (const [cand, candIds] of deletedIds) {
-      if (claimed.has(cand)) continue;
-      let n = 0;
-      for (const id of mine) if (candIds.has(id)) n++;
-      if (n > bestN) { best = cand; bestN = n; }
-    }
-    if (best !== null) {
-      claimed.add(best);
-      return [headText(best), best];
-    }
-    return [null, null];
-  }
-
-  const results = [];
-  const notes = [];
-  let anyError = false;
-  for (const [status, src, dst] of changed) {
-    const staged = stagedText.get(dst);
-    const [baseline, origin] = baselineFor(status, src, dst);
-    let findings = [...lintDocument(staged).findings];
-    if (baseline != null) findings = findings.concat(lintDiff(baseline, staged));
-
-    const kept = [];
-    for (const f of findings) {
-      if (f.code === "DROPPED_ID" && committedIds.has(f.id)) {
-        const elsewhere = [...stagedIds]
-          .filter(([p, s]) => p !== dst && s.has(f.id))
-          .map(([p]) => p)
-          .sort();
-        notes.push(`  ${f.id}: moved out of ${origin ?? dst} into ${elsewhere.join(", ")}`
-          + " (still in this commit, not blocking)");
-        continue;
-      }
-      kept.push(f);
-    }
-    if (scope.size && !scope.has(dst)) continue;   // out of the caller's scope
-    if (kept.length) {
-      const label = origin == null || origin === dst ? dst : `${dst} (baseline ${origin})`;
-      results.push([label, kept]);
-      if (hasErrors(kept)) anyError = true;
-    }
-  }
-
-  for (const path of deleted) {
-    if (claimed.has(path)) continue;
-    const gone = [...(deletedIds.get(path) ?? [])].filter((id) => !committedIds.has(id));
-    if (gone.length) {
-      notes.push(`  ${path}: deleted with ${gone.length} stay(s) that no staged file `
-        + `carries (${gone.sort().slice(0, 6).join(", ")}${gone.length > 6 ? ", ..." : ""})`);
-    }
-  }
+  const materialized = entries
+    .filter(([status, src, dst]) => status === "D"
+      ? isMarkdown(src)
+      : status === "R"
+        ? isMarkdown(src) || isMarkdown(dst)
+        : isMarkdown(dst))
+    .map(([status, src, dst]) => ({
+      status,
+      src,
+      dst,
+      before: headText(["R", "C", "D"].includes(status) ? src : dst),
+      after: status === "D" ? null : afterText(dst),
+    }));
+  const result = checkEntries(materialized, { scope: [...scope] });
+  const results = result.reports;
+  const notes = result.notes;
 
   if (flags.json) {
     const payload = {};
@@ -405,10 +356,10 @@ function runCheck(verb, rest, source) {
     if (shown.length) process.stderr.write(shown.join("\n") + "\n");
     if (notes.length) {
       process.stderr.write("markstay: stays that changed document (not blocking):\n"
-        + notes.join("\n") + "\n");
+        + notes.map((note) => `  ${note}`).join("\n") + "\n");
     }
   }
-  if (anyError) {
+  if (result.hasErrors) {
     process.stderr.write("\nmarkstay: this commit breaks a stay (dropped / duplicated / "
       + "relocated / malformed). Fix it, or bypass once with `git commit --no-verify`.\n");
     return 1;

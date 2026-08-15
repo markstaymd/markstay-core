@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,24 @@ import { fileURLToPath } from "node:url";
 import { lintDocument, lintDiff, PRESERVE_INSTRUCTION, preserveWrap } from "../src/index.js";
 
 const CLI = fileURLToPath(new URL("../bin/cli.js", import.meta.url));
+
+test("README keeps the preservation instruction ahead of the check backstop", () => {
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const instruction = readme.indexOf("## Keeping stays alive through an agent's edit");
+  const cli = readme.indexOf("## CLI");
+  const preserve = readme.indexOf("markstay preserve", cli);
+  const check = readme.indexOf("markstay check-staged", cli);
+  assert.ok(instruction >= 0 && instruction < cli, "instruction section must precede CLI checks");
+  assert.ok(preserve >= 0 && preserve < check, "preserve must precede check-staged in CLI examples");
+});
+
+test("type declarations cover the public commit-check exports", () => {
+  const declarations = readFileSync(new URL("../src/index.d.ts", import.meta.url), "utf8");
+  assert.match(declarations, /export interface CommitEntry\s*{/);
+  assert.match(declarations, /export interface StagedCheck\s*{/);
+  assert.match(declarations, /export function isMarkdown\(path: string\): boolean;/);
+  assert.match(declarations, /export function checkEntries\(/);
+});
 
 // Run the CLI and capture stdout. `lint` exits 1 on any error-level finding, so
 // capture the output on a non-zero exit instead of letting execFileSync throw.

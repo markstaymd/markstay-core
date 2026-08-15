@@ -206,3 +206,127 @@ test("quote matcher: no good match scores below threshold", () => {
   const { score } = bestMatch({ quote: "completely unrelated text xyz" }, cands);
   assert.ok(score < 0.5);
 });
+
+// --- leading YAML frontmatter is metadata, not a block (SPEC.md §5) -------
+
+const FM_DOC = "---\nstatus: active\nowner: tim\n---\n\n# Heading\n\nBody para.\n";
+const contents = (md) => parseDocument(md).map((b) => b.content);
+
+test("frontmatter is not a block", () => {
+  assert.deepEqual(contents(FM_DOC), ["# Heading", "Body para."]);
+});
+
+test("frontmatter does not shift line numbers", () => {
+  // blanking is line-for-line, so reported lines stay true to the source
+  assert.deepEqual(
+    parseDocument(FM_DOC).map((b) => [b.index, b.line]),
+    [[0, 6], [1, 8]]
+  );
+});
+
+test("a metadata-only edit does not drift a content hash", () => {
+  const before = parseDocument(FM_DOC).map((b) => bodyHash(b.content));
+  const after = parseDocument(FM_DOC.replace("status: active", "status: complete"))
+    .map((b) => bodyHash(b.content));
+  assert.deepEqual(after, before);
+});
+
+test("a leading --- with no closing fence is a thematic break", () => {
+  assert.deepEqual(contents("---\n\n# Heading\n\nBody para.\n"), [
+    "---", "# Heading", "Body para.",
+  ]);
+});
+
+test("frontmatter does not swallow a paragraph between two thematic breaks", () => {
+  // Regression, found by external review of the reference: the naive
+  // first-closing-fence rule silently ate `Intro paragraph.`
+  assert.deepEqual(contents("---\n\nIntro paragraph.\n\n---\n\nBody.\n"), [
+    "---", "Intro paragraph.", "---", "Body.",
+  ]);
+});
+
+test("frontmatter does not swallow a setext heading", () => {
+  // `---` / `Title` / `---` is a thematic break plus a setext H2; the payload has
+  // to look like YAML before the span is treated as metadata.
+  assert.ok(contents("---\nTitle\n---\n\nBody.\n").join("\n").includes("Title"));
+});
+
+test("frontmatter does not swallow an ATX heading", () => {
+  // Regression, found by external review: a YAML comment and an ATX heading are
+  // byte-identical, so `#` cannot be the evidence that a span is frontmatter.
+  assert.ok(contents("---\n# Heading\n---\nBody.\n").join("\n").includes("# Heading"));
+  assert.ok(
+    contents("---\n# just a comment\n---\n\nBody.\n").join("\n").includes("# just a comment")
+  );
+});
+
+test("a payload with a blank line is not frontmatter", () => {
+  // Fails towards ordinary Markdown: not skipping is a stray drift warning, while
+  // over-skipping silently destroys content.
+  assert.ok(contents("---\nstatus: active\n\nowner: tim\n---\n\nBody.\n")
+    .some((c) => c.includes("status: active")));
+});
+
+test("an empty payload is not frontmatter", () => {
+  assert.ok(contents("---\n---\n\nBody.\n").some((c) => c.includes("---")));
+});
+
+test("yaml-ish payload forms are recognized", () => {
+  for (const payload of ["status: active", "- one\n- two", "empty:", "nested:\n  a: 1"]) {
+    assert.deepEqual(contents(`---\n${payload}\n---\n\nBody.\n`), ["Body."], payload);
+  }
+});
+
+test("the closing fence tolerates trailing whitespace and accepts ...", () => {
+  assert.deepEqual(contents("---\nkey: v\n---   \n\nBody.\n"), ["Body."]);
+  assert.deepEqual(contents("---\ntitle: t\n...\n\n# Heading\n\nBody.\n"), [
+    "# Heading", "Body.",
+  ]);
+});
+
+test("CRLF is normalized before frontmatter detection", () => {
+  assert.deepEqual(contents("---\r\nkey: v\r\n---\r\n\r\n# H\r\n\r\nBody.\r\n"), [
+    "# H", "Body.",
+  ]);
+});
+
+test("frontmatter is only recognized at document start", () => {
+  const md = "# Heading\n\n---\ntitle: not frontmatter\n---\n\nBody.\n";
+  assert.ok(contents(md).join("\n").includes("title: not frontmatter"));
+});
+
+test("no blank line after the closing fence still splits correctly", () => {
+  // A filter-the-chunks-afterwards implementation gets this one wrong.
+  assert.deepEqual(contents("---\ntitle: t\n---\n# Heading\n\nBody.\n"), [
+    "# Heading", "Body.",
+  ]);
+});
+
+test("frontmatter: the yaml-ish test is ASCII-pinned, not runtime whitespace", () => {
+  // Cross-language agreement, found by external review of the port: `\S` means
+  // three different things in Python, ECMAScript and Rust, so the rule spells the
+  // ASCII set out. An ASCII control character is not a key start (the span stays
+  // ordinary Markdown); an exotic non-ASCII space is, exactly as for hashing (§8),
+  // where NBSP is content rather than whitespace.
+  assert.ok(
+    contents("---\n\x1ckey: v\n---\n\nBody.\n").some((c) => c.includes("key: v")),
+    "an ASCII control is not a key start"
+  );
+  for (const ch of [" ", "", "﻿"]) {
+    assert.deepEqual(contents(`---\n${ch}key: v\n---\n\nBody.\n`), ["Body."], JSON.stringify(ch));
+    assert.deepEqual(contents(`---\n- ${ch}\n---\n\nBody.\n`), ["Body."], JSON.stringify(ch));
+  }
+});
+
+test("a marker after the closing fence is an orphan", () => {
+  // The visible consequence for a doc stamped before this change.
+  const { findings } = lintDocument("---\nkey: v\n---\n<!-- stay:x -->\n\nBody.\n");
+  assert.ok(codes(findings).includes("ORPHAN_MARKER"));
+});
+
+test("a marker inside the frontmatter payload is dropped", () => {
+  // Pins actual behaviour: the marker is blanked with the rest of the metadata and
+  // raises nothing. No tool writes one there (the stamper writes after the block).
+  const { findings } = lintDocument("---\nkey: v\n<!-- stay:x -->\n---\n\nBody.\n");
+  assert.deepEqual(codes(findings), []);
+});
