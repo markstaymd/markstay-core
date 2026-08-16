@@ -4,7 +4,7 @@
 
 import { bodyHash } from "./hash.js";
 import { parseDocument } from "./parse.js";
-import { bestMatch } from "./quote.js";
+import { bestMatch, windowPrefix, windowSuffix } from "./quote.js";
 
 // Default thresholds for the QUOTE tier (SPEC.md §9 commit rule). A recovery is
 // committed only when the best candidate clears `threshold` AND beats the
@@ -36,7 +36,14 @@ export function buildAnchorsFromBlocks(blocks) {
     const b = blocks[i];
     const prevText = i > 0 ? blocks[i - 1].content : "";
     const nextText = i + 1 < blocks.length ? blocks[i + 1].content : "";
-    const selector = { quote: b.content, prefix: prevText, suffix: nextText };
+    // SPEC.md §9: the stored prefix/suffix carry up to 48 characters of the
+    // neighbour on each side. Storing whole blocks caps the achievable ratio
+    // near 2*48/(len+48), because the candidate side is windowed at match time.
+    const selector = {
+      quote: b.content,
+      prefix: windowPrefix(prevText),
+      suffix: windowSuffix(nextText),
+    };
     for (const mk of b.markers) {
       if (mk.id && !mk.malformed) {
         anchors.push({ id: mk.id, hash: bodyHash(b.content), selector });

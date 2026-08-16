@@ -9,6 +9,21 @@ import { asciiTrim, asciiCollapse, asciiLower } from "./text.js";
 export const CONTEXT_CHARS = 48;
 
 /**
+ * The last CONTEXT_CHARS code points of a preceding neighbour (SPEC.md §9:
+ * prefix/suffix "carry up to 48 characters of the neighbour on each side").
+ * Applied to raw text before normalization, on both sides of the comparison, so
+ * whitespace collapse cannot change how much text survives on one side only.
+ */
+export function windowPrefix(text) {
+  return cpSlice(text, -CONTEXT_CHARS);
+}
+
+/** The first CONTEXT_CHARS code points of a following neighbour. */
+export function windowSuffix(text) {
+  return cpSlice(text, 0, CONTEXT_CHARS);
+}
+
+/**
  * §9 matching normalization: lowercase ASCII letters and collapse ASCII
  * whitespace runs to a single space, then trim. Capitalization and reflowed line
  * breaks (common after an LLM edit) must not register as differences.
@@ -68,10 +83,10 @@ export function bodyScore(sel, candidate) {
 export function contextBonus(sel, prevText, nextText) {
   let bonus = 0.0;
   if (sel.prefix) {
-    bonus += 0.05 * quoteRatio(normalize(sel.prefix), normalize(cpSlice(prevText, -CONTEXT_CHARS)));
+    bonus += 0.05 * quoteRatio(normalize(windowPrefix(sel.prefix)), normalize(windowPrefix(prevText)));
   }
   if (sel.suffix) {
-    bonus += 0.05 * quoteRatio(normalize(sel.suffix), normalize(cpSlice(nextText, 0, CONTEXT_CHARS)));
+    bonus += 0.05 * quoteRatio(normalize(windowSuffix(sel.suffix)), normalize(windowSuffix(nextText)));
   }
   return bonus;
 }

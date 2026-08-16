@@ -128,6 +128,18 @@ function vResolve(v) {
   return { ok: approx(got, v.resolutions), got };
 }
 
+// What `buildAnchors` STORES (§9), as opposed to what `resolve` decides. A
+// separate category because resolution cannot see it: an implementation storing
+// whole neighbour blocks and one storing §9's 48-character window resolve
+// identically, since both window at match time. §9 constrains the stored field.
+function vAnchors(v) {
+  const got = buildAnchors(v.document).map((a) => ({
+    id: a.id, hash: a.hash, quote: a.selector.quote,
+    prefix: a.selector.prefix, suffix: a.selector.suffix,
+  }));
+  return { ok: approx(got, v.anchors), got };
+}
+
 const seqFactory = (ids) => {
   let i = 0;
   return () => ids[i++];
@@ -209,6 +221,7 @@ const VERIFIERS = {
   hash: vHash, markers: vMarkers, parse: vParse, lint: vLint,
   diff: vDiff, seqmatch: vSeqmatch, score: vScore, resolve: vResolve,
   stamp: vStamp, mint: vMint, preserve: vPreserve, check: vCheck,
+  anchors: vAnchors,
 };
 
 // --- drive the corpus ------------------------------------------------------
