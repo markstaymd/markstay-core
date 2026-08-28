@@ -19,7 +19,7 @@ const MDX_MARKER_SRC = "\\{/\\*\\s*(stay:.*?)\\s*\\*/\\}";
 // whose first token is a bare `k=v` and is therefore malformed. Mirrors the
 // Python reference's `ID_RE.match(body)`.
 const ID_RE = /^stay:\s*([A-Za-z0-9_-]+)(?=\s|$)/;
-const HASH_RE = /\bhash\s*=\s*sha256:([0-9a-fA-F]+)/;
+const HASH_RE = /(?<![^\s])hash\s*=\s*sha256:([0-9a-fA-F]+)/;
 
 function countNewlines(s) {
   let n = 0;

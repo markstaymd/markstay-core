@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.2-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.4-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.2), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.4), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -17,6 +17,13 @@ This is the **parser-free core**: everything string-level and parser-independent
 It covers both halves of the spec, the read side (parse / lint / resolve) and the
 write side (mint ids, stamp a document, refresh hashes, repair duplicates). The
 CommonMark-tree (§5.2) mdast adapter ships separately as `remark-stay`.
+
+**Child-block identity (§5.5) is not implemented here.** Version 1.3 lets a direct list
+item carry its own stay under the reserved `subhash` key, and §16 makes segmenting and
+resolving those **optional**. What §16 makes mandatory for every tool is the write-path
+shim, which this package honours: a `subhash` marker is preserved verbatim, never given
+a container hash, and never counted as its block's stay. The Python reference implements
+the section itself.
 
 ## Install
 

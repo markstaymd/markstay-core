@@ -234,6 +234,40 @@ test("restamp: addMissing gives a hashless marker a hash", () => {
   assert.equal(mk.hash, bodyHash("Body text.", 12));
 });
 
+test("restamp: addMissing leaves a subhash marker alone (§5.5)", () => {
+  // A child marker addresses the list item, so the list's digest must not be
+  // written in beside it. This build has no child support at all, which is
+  // exactly the tool the rule is aimed at.
+  const md = "- Alpha <!-- stay:k1 subhash=sha256:8655 -->\n- Beta\n";
+  const { text, refreshed } = restamp(md, { addMissing: true });
+  assert.equal(text, md);
+  assert.deepEqual(refreshed, []);
+});
+
+test("stamp: a subhash marker does not make its block stamped (§16)", () => {
+  // The other half of the write-path shim. A tool with no child support must not
+  // read child markers as evidence the list is done, or the container never gets a
+  // stay and every child in it resolves on tier-4 evidence.
+  const md = "- Ship the linter <!-- stay:c1 subhash=sha256:9d2f -->\n- Ship the hook <!-- stay:c2 subhash=sha256:41ac -->\n";
+  const { text, minted } = stamp(md, { newId: () => "cont1" });
+  assert.equal(minted.length, 1);
+  assert.equal(minted[0].id, "cont1");
+  assert.ok(text.includes("<!-- stay:cont1 hash=sha256:"));
+  // and the children are untouched
+  assert.ok(text.includes("stay:c1 subhash=sha256:9d2f"));
+  assert.ok(text.includes("stay:c2 subhash=sha256:41ac"));
+});
+
+test("stamp: a custom key ending in subhash is not the reserved key (§4)", () => {
+  // The boundary is whitespace, not \b: a hyphen is not a word character, so a word
+  // boundary would read `x-subhash` as the reserved key and mint a second stay onto a
+  // block that already has one.
+  const md = "A paragraph.\n<!-- stay:x1 x-subhash=sha256:abcd -->\n";
+  const { text, minted } = stamp(md, { newId: () => "spurious" });
+  assert.deepEqual(minted, []);
+  assert.equal(text, md);
+});
+
 // --- repairDuplicates (§7) ---
 
 test("repairDuplicates: first occurrence kept, later ones re-minted, lints clean", () => {

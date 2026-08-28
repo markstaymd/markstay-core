@@ -112,6 +112,20 @@ function uniqueMinter(used, newId) {
  *
  * Returns { text, minted: [{ id, line }] }. Line endings are normalized to LF.
  */
+/**
+ * True when a marker carries the reserved `subhash` key (SPEC.md §4, §5.5), which
+ * addresses a list item rather than the block around it.
+ *
+ * The boundary is whitespace, not `\b`. An attribute is a whitespace-separated token
+ * (§4), and `\b` accepts a custom key merely ENDING in the reserved one, because a
+ * hyphen is not a word character: `x-subhash=sha256:ab` would read as `subhash` and
+ * this tool would act on an attribute §4 tells it to preserve and ignore. Nothing
+ * conforming loses by the tighter rule, since every attribute follows whitespace.
+ */
+function carriesSubhash(raw) {
+  return /(?<![^\s])subhash\s*=\s*sha256:[0-9a-fA-F]+/.test(raw);
+}
+
 export function stamp(md, opts = {}) {
   const {
     syntax = "html",
@@ -141,7 +155,13 @@ export function stamp(md, opts = {}) {
   let current = null;
   for (const [startLine, chunk] of segmentBlankLine(blankFrontmatter(norm))) {
     const content = asciiTrim(stripMarkers(chunk));
-    const hasId = findMarkers(chunk).some((mk) => mk.id && !mk.malformed);
+    // SPEC.md §16: a `subhash` marker addresses a list item, so it never makes the
+    // block around it stamped. Unconditional, like the guard in restamp: a tool that
+    // cannot see children still has to leave the container stampable, or a
+    // child-stamped list never gets a stay of its own.
+    const hasId = findMarkers(chunk).some(
+      (mk) => mk.id && !mk.malformed && !carriesSubhash(mk.raw),
+    );
     if (content !== "") {
       const nLines = chunk.split("\n").length;
       current = { lastLine0: startLine + nLines - 2, content, hasId };
@@ -205,11 +225,18 @@ export function restamp(md, opts = {}) {
       const now = bodyHash(content, len);
       if (now === mk.hash) return null; // unchanged at this precision
       refreshed.push(mk.id);
-      // \b mirrors the read-path HASH_RE: without it the sub false-matches the
-      // `hash` inside a custom key like `rehash` and corrupts a §4-preserved key.
-      return mk.raw.replace(/\bhash\s*=\s*sha256:[0-9a-fA-F]+/, `hash=sha256:${now}`);
+      // The whitespace boundary mirrors the read-path HASH_RE: without it the
+      // replace false-matches the `hash` inside a custom key (`rehash`, `x-hash`) and
+      // corrupts a §4-preserved key.
+      return mk.raw.replace(
+        /(?<![^\s])hash\s*=\s*sha256:[0-9a-fA-F]+/,
+        `hash=sha256:${now}`,
+      );
     }
     if (addMissing) {
+      // SPEC.md §5.5: a marker carrying `subhash` addresses a list item, never
+      // the block around it, so the block's digest must not be added beside it.
+      if (carriesSubhash(mk.raw)) return null;
       const now = bodyHash(content, hashLength ?? DEFAULT_HASH_LENGTH);
       refreshed.push(mk.id);
       return mk.raw.replace(/(stay:\s*[A-Za-z0-9_-]+)/, `$1 hash=sha256:${now}`);
