@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.4-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.5-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.4), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.5), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -210,29 +210,30 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The shared corpus contributes 332 cross-language assertions; CLI and unit tests
+The shared corpus contributes 408 cross-language assertions; CLI and unit tests
 cover the Git adapter, rendering, and write-path invariants around it.
 
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **332 vectors** across two tiers:
+reference. **408 vectors** across two tiers:
 
 | category | spec | gen | covers |
 |----------|-----:|----:|--------|
 | hash     | 10   | 14  | §8 ASCII normalization + SHA-256 + truncation (incl. NBSP kept) |
 | markers  | 9    | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex |
-| parse    | 21   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion and the thematic-break spans it must not eat |
-| lint     | 7    | 8   | §7/§8/§10 findings (ordered) |
+| parse    | 50   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion, the thematic-break spans it must not eat, and §3.3's fenced-code mask |
+| lint     | 11   | 8   | §7/§8/§10 findings (ordered) |
 | diff     | 6    | 6   | §11 regeneration diff (ordered) |
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
-| score    | 12   | 17  | §9 wrappers: body score, context bonus, best match, ASCII fold |
-| resolve  | 4    | 5   | §9.1 ladder + margin guard |
+| score    | 12   | 19  | §9 wrappers: body score, context bonus, best match, ASCII fold |
+| resolve  | 25   | 9   | §9.1 ladder + margin guard |
+| anchors  | 3    | 0   | §9 selector storage, which resolution cannot see |
 | mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
-| stamp    | 0    | 16  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair |
+| stamp    | 9    | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule |
 | preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
 | check    | 13   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
-| **total**| **102** | **230** | |
+| **total**| **168** | **240** | |
 
 The `preserve` row is the odd one and deliberately so: it holds plain prose rather
 than a computation. Each implementation carries its own copy of the §11 instruction

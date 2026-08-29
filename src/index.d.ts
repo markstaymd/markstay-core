@@ -154,11 +154,31 @@ export interface RawMarker {
 
 /**
  * Rewrite markers in place, in document order. `transform` returns a replacement
- * string, or null/undefined to leave a marker unchanged.
+ * string, or null/undefined to leave a marker unchanged. `code` is the SPEC.md
+ * §3.3 mask: matches opening on one of those lines are left byte-for-byte alone.
  */
 export function rewriteMarkers(
   text: string,
-  transform: (marker: RawMarker) => string | null | undefined
+  transform: (marker: RawMarker) => string | null | undefined,
+  code?: ReadonlySet<number> | null
+): string;
+
+// --- fenced code blocks (code.js, SPEC.md §3.3) ---
+
+/** Fence geometry: lines inside a fence, and lines a fence is still open after. */
+export interface FenceState {
+  inside: Set<number>;
+  openAfter: Set<number>;
+}
+
+export function fenceState(text: string): FenceState;
+/** The 1-based line numbers inside a fenced code block (SPEC.md §3.3). */
+export function codeLines(text: string): Set<number>;
+/** Strip markers, leaving marker-shaped strings inside a fence in place (§3.3). */
+export function stripMarkersOutsideCode(
+  text: string,
+  code: ReadonlySet<number>,
+  lineOffset?: number
 ): string;
 
 // --- id generation (id.js, SPEC.md §6) ---

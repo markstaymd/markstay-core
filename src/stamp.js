@@ -9,7 +9,8 @@
 
 import { bodyHash } from "./hash.js";
 import { parseDocument } from "./parse.js";
-import { findMarkers, stripMarkers, rewriteMarkers } from "./markers.js";
+import { findMarkers, rewriteMarkers } from "./markers.js";
+import { codeLines, fenceState, stripMarkersOutsideCode } from "./code.js";
 import { blankFrontmatter, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
 import { mintId, ID_CHARSET } from "./id.js";
@@ -140,7 +141,16 @@ export function stamp(md, opts = {}) {
   const norm = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = norm.split("\n");
 
-  // Existing ids across the whole document, so a minted id can't collide.
+  // SPEC.md §3.3, computed on the blanked text so it agrees line-for-line with
+  // what parseDocument sees. `openAfter` is the writer's half of the rule: a
+  // marker appended after a line a fence is still open on lands *inside the
+  // listing*, which is how this project's own §4 grammar block acquired a real
+  // marker in the middle of its ABNF.
+  const { inside: code, openAfter: fenceOpenAfter } = fenceState(blankFrontmatter(norm));
+
+  // Existing ids across the whole document, so a minted id can't collide. The raw
+  // scan is deliberate: an id shown in a fenced example is not an id, but minting
+  // the same token beside it would read as one to every human.
   const used = new Set();
   for (const mk of findMarkers(norm)) if (mk.id && !mk.malformed) used.add(mk.id);
   const nextId = uniqueMinter(used, newId ?? (() => mintId({ length, alphabet, random })));
@@ -154,17 +164,34 @@ export function stamp(md, opts = {}) {
   const needsStamp = []; // { lastLine0, content }
   let current = null;
   for (const [startLine, chunk] of segmentBlankLine(blankFrontmatter(norm))) {
-    const content = asciiTrim(stripMarkers(chunk));
+    const content = asciiTrim(stripMarkersOutsideCode(chunk, code, startLine - 1));
     // SPEC.md §16: a `subhash` marker addresses a list item, so it never makes the
     // block around it stamped. Unconditional, like the guard in restamp: a tool that
     // cannot see children still has to leave the container stampable, or a
     // child-stamped list never gets a stay of its own.
-    const hasId = findMarkers(chunk).some(
-      (mk) => mk.id && !mk.malformed && !carriesSubhash(mk.raw),
+    const hasId = findMarkers(chunk, startLine - 1).some(
+      // §3.3: an example never stamps its block.
+      (mk) => mk.id && !mk.malformed && !carriesSubhash(mk.raw) && !code.has(mk.line),
     );
     if (content !== "") {
       const nLines = chunk.split("\n").length;
-      current = { lastLine0: startLine + nLines - 2, content, hasId };
+      current = {
+        lastLine0: startLine + nLines - 2,
+        content,
+        hasId,
+        // §3.3 writer rule, in the two halves it actually has. A block is refused
+        // when a fence was already open *before* its first line (its span lies
+        // inside a listing), or when one is still open after its last (the marker
+        // would be written into the listing). Both are needed and neither implies
+        // the other: the baseline segmenter splits a blank-line fence into halves,
+        // and the second half starts inside the fence while ending on the closing
+        // line, where an insertion-point test alone would happily stamp half a
+        // listing. "Before its first line" rather than "its first line is code" is
+        // what keeps a complete fence stampable under §5.2, where the block *is*
+        // the fence and takes its stay after the closing line in the ordinary way.
+        inFence:
+          fenceOpenAfter.has(startLine - 1) || fenceOpenAfter.has(startLine + nLines - 1),
+      };
       needsStamp.push(current);
     } else if (current) {
       // marker-only chunk: its id (if any) identifies the preceding block
@@ -175,7 +202,7 @@ export function stamp(md, opts = {}) {
   const insertAfter = new Map(); // 0-based line -> marker text
   const minted = [];
   for (const blk of needsStamp) {
-    if (blk.hasId) continue;
+    if (blk.hasId || blk.inFence) continue;
     const id = nextId();
     const hex = hash ? bodyHash(blk.content, hashLength) : null;
     insertAfter.set(blk.lastLine0, formatMarker({ id, hash: hex, syntax }));
@@ -217,6 +244,9 @@ export function restamp(md, opts = {}) {
   }
 
   const refreshed = [];
+  // §3.3: an illustrative marker in a fence is not this document's marker, and
+  // rewriting its `hash=` to the digest of the fence around it is the defect that
+  // opened the rule.
   const text = rewriteMarkers(norm, (mk) => {
     if (!mk.id || !contentById.has(mk.id)) return null;
     const content = contentById.get(mk.id);
@@ -242,7 +272,7 @@ export function restamp(md, opts = {}) {
       return mk.raw.replace(/(stay:\s*[A-Za-z0-9_-]+)/, `$1 hash=sha256:${now}`);
     }
     return null;
-  });
+  }, codeLines(blankFrontmatter(norm)));
   return { text, refreshed };
 }
 
@@ -288,6 +318,6 @@ export function repairDuplicates(md, opts = {}) {
     const fresh = nextId();
     renamed.push({ from: mk.id, to: fresh });
     return mk.raw.replace(/stay:\s*[A-Za-z0-9_-]+/, `stay:${fresh}`);
-  });
+  }, codeLines(blankFrontmatter(norm)));
   return { text, renamed };
 }

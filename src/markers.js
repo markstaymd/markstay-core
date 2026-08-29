@@ -4,9 +4,14 @@
 // Marker discovery is a raw-text scan, exactly as in the reference: the body is
 // captured lazily up to the closing delimiter, then id / hash are pulled out of
 // it. Capturing the whole body (not a fixed attribute order) tolerates reordered
-// or extra attributes (SPEC.md §4 free-order grammar). A marker-shaped comment
-// inside a code fence is therefore treated as a real marker (the current
-// reference behaviour; whether it should is a tracked Open question).
+// or extra attributes (SPEC.md §4 free-order grammar).
+//
+// Discovery here is deliberately code-blind: it answers "is this a well-formed
+// marker" for a string with no document around it, which is what the conformance
+// corpus needs. SPEC.md §3.3 (a marker inside a fenced code block is content) is
+// a *document*-level rule and cannot be applied here, because these functions are
+// handed chunks and a chunk that begins inside a fence carries no opener. Callers
+// that segment a whole document filter the result against `codeLines` (code.js).
 
 // Python re.DOTALL -> JS `s` flag so `.` spans newlines. `\s` agrees with
 // Python's on ASCII (the corpus keeps marker whitespace ASCII).
@@ -64,7 +69,12 @@ export function findMarkers(text, lineOffset = 0) {
   return out;
 }
 
-/** Remove every marker from `text` (HTML first, then MDX, as the reference). */
+/**
+ * Remove every marker-shaped string from `text` (HTML first, then MDX, as the
+ * reference). A raw grammar-level primitive: it is code-blind, so a caller that
+ * must honour SPEC.md §3.3 passes a document-level mask to
+ * `stripMarkersOutsideCode` (code.js) instead.
+ */
 export function stripMarkers(text) {
   return text
     .replace(new RegExp(HTML_MARKER_SRC, "gs"), "")
@@ -74,7 +84,7 @@ export function stripMarkers(text) {
 // One combined HTML|MDX pattern so a single ordered pass sees every marker in
 // document order (rather than all HTML then all MDX). Capture group 1 is the HTML
 // body, group 2 the MDX body; exactly one is set per match.
-const COMBINED_MARKER_SRC = `${HTML_MARKER_SRC}|${MDX_MARKER_SRC}`;
+export const COMBINED_MARKER_SRC = `${HTML_MARKER_SRC}|${MDX_MARKER_SRC}`;
 
 /**
  * Rewrite markers in place, in document order, without disturbing surrounding
@@ -82,10 +92,18 @@ const COMBINED_MARKER_SRC = `${HTML_MARKER_SRC}|${MDX_MARKER_SRC}`;
  * a replacement string, or null/undefined to leave the marker unchanged. The
  * write helpers (restamp, repairDuplicates) build on this so marker edits reuse
  * the one canonical grammar instead of re-deriving it.
+ *
+ * `code` is the SPEC.md §3.3 mask for `text` (a Set of 1-based line numbers
+ * inside a fenced code block). Matches opening on one of those lines are left
+ * byte-for-byte alone: they are an example, not a marker, and rewriting one is
+ * how a restamp overwrites a document's illustrative `hash=` values.
  */
-export function rewriteMarkers(text, transform) {
+export function rewriteMarkers(text, transform, code = null) {
   const re = new RegExp(COMBINED_MARKER_SRC, "gs");
-  return text.replace(re, (full, htmlBody, mdxBody) => {
+  return text.replace(re, (full, htmlBody, mdxBody, offset) => {
+    if (code && code.size > 0 && code.has(countNewlines(text.slice(0, offset)) + 1)) {
+      return full;
+    }
     const body = htmlBody !== undefined ? htmlBody : mdxBody;
     const syntax = htmlBody !== undefined ? "html" : "mdx";
     const idm = ID_RE.exec(body);
