@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 
 import {
   bodyHash, parseDocument, lintDocument, lintDiff, hasErrors,
-  bestMatch, buildAnchors, resolve,
+  bestMatch, buildAnchors, checkEntries, resolve,
 } from "../src/index.js";
 
 const codes = (findings) => findings.map((f) => f.code).sort();
@@ -74,6 +74,21 @@ test("hash drift is a warning, not an error", () => {
   assert.ok(!hasErrors(findings));
 });
 
+test("subhash markers stay lexical for duplicate ids but never bind to containers", () => {
+  const md =
+    "<!-- stay:child subhash=bogus hash=sha256:dead -->\n\n" +
+    "Body.\n<!-- stay:child subhash=bogus hash=sha256:dead -->\n";
+  const { findings } = lintDocument(md);
+  assert.deepEqual(codes(findings), ["DUPLICATE_ID", "ORPHAN_MARKER"]);
+});
+
+test("x-subhash is an ordinary block attribute", () => {
+  const { findings } = lintDocument(
+    "Body.\n<!-- stay:block x-subhash=sha256:abcd hash=sha256:dead -->\n",
+  );
+  assert.deepEqual(codes(findings), ["HASH_DRIFT"]);
+});
+
 test("MDX marker is parsed with mdx syntax", () => {
   const blocks = parseDocument("An MDX block.\n{/* stay:mdx1 hash=sha256:abcd */}\n");
   assert.equal(blocks[0].markers[0].id, "mdx1");
@@ -123,6 +138,11 @@ test("diff treats an in-place edit as drift, not relocation", () => {
   assert.deepEqual(codes(lintDiff(before, after)), ["HASH_DRIFT"]);
 });
 
+test("diff ignores child ids as container identity", () => {
+  const before = "Body.\n<!-- stay:child subhash=bogus -->\n";
+  assert.deepEqual(lintDiff(before, "Body.\n"), []);
+});
+
 // --- resolver ladder (ported / adapted from test_attach.py) ---------------
 
 const REORDER_BEFORE =
@@ -136,6 +156,35 @@ test("marker tier: markers kept means every id resolves by marker", () => {
   const res = resolve(buildAnchors(REORDER_BEFORE), after);
   assert.equal(res.ing.method, "marker");
   assert.equal(res.dlq.method, "marker");
+});
+
+test("anchors and MARKER lookup exclude exact-key subhash markers", () => {
+  const before =
+    "Body.\n" +
+    "<!-- stay:child subhash=bogus -->\n" +
+    "<!-- stay:custom x-subhash=bogus -->\n" +
+    "<!-- stay:parent -->\n";
+  assert.deepEqual(buildAnchors(before).map((a) => a.id), ["custom", "parent"]);
+
+  const ordinary = "Body.\n<!-- stay:c -->\n";
+  const child = "Body.\n<!-- stay:c subhash=bogus -->\n";
+  assert.equal(resolve(buildAnchors(ordinary), child).c.method, "hash");
+});
+
+test("staged pairing ignores overlap supplied only by child ids", () => {
+  const result = checkEntries([
+    {
+      status: "D", src: "old.md", dst: "old.md",
+      before: "Old.\n<!-- stay:c subhash=bogus -->\n", after: null,
+    },
+    {
+      status: "A", src: "new.md", dst: "new.md", before: null,
+      after: "New.\n<!-- stay:c subhash=bogus -->\n",
+    },
+  ]);
+  assert.deepEqual(result.pairings, [{ path: "new.md", baseline: null }]);
+  assert.deepEqual(result.notes, []);
+  assert.deepEqual(result.reports, []);
 });
 
 test("hash tier: stripped + reordered verbatim recovers by hash", () => {

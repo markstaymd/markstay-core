@@ -3,6 +3,7 @@
 // `_id_index`, `sort_findings`, `has_errors` from linter/markstay_lint.py.
 
 import { bodyHash } from "./hash.js";
+import { isBlockStayMarker } from "./markers.js";
 import { parseDocument } from "./parse.js";
 
 const LEVELS = { error: 0, warn: 1, info: 2 };
@@ -36,12 +37,8 @@ export function lintBlocks(blocks) {
         );
         continue;
       }
-      if (orphan) {
-        findings.push(
-          finding("error", "ORPHAN_MARKER",
-            `marker ${mk.id} has no preceding block to attach to`, mk.id, mk.line)
-        );
-      }
+      // Duplicate ids are a document-global lexical invariant. Child markers
+      // remain in that namespace even though §16 forbids container attribution.
       if (seen.has(mk.id)) {
         findings.push(
           finding("error", "DUPLICATE_ID",
@@ -51,6 +48,14 @@ export function lintBlocks(blocks) {
       } else {
         seen.set(mk.id, mk.line);
       }
+      if (orphan) {
+        findings.push(
+          finding("error", "ORPHAN_MARKER",
+            `marker ${mk.id} has no preceding block to attach to`, mk.id, mk.line)
+        );
+        continue;
+      }
+      if (!isBlockStayMarker(mk)) continue;
       if (mk.hash && b.content) {
         const now = bodyHash(b.content, mk.hash.length);
         if (now !== mk.hash) {
@@ -82,7 +87,7 @@ export function idIndex(blocks) {
   for (const b of blocks) {
     if (b.index < 0) continue;
     for (const mk of b.markers) {
-      if (mk.id && !mk.malformed) {
+      if (mk.id && isBlockStayMarker(mk)) {
         let arr = out.get(mk.id);
         if (arr === undefined) {
           arr = [];

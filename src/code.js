@@ -11,7 +11,7 @@
 // blanking this is a mask rather than a removal, because a fence's content must
 // still be hashed (§8).
 
-import { COMBINED_MARKER_SRC, stripMarkers } from "./markers.js";
+import { scanMarkerRecords, stripMarkers } from "./markers.js";
 
 // An opening fence may carry an info string; a *closing* fence may not, and a
 // backtick fence's info string may not contain a backtick (CommonMark 4.5).
@@ -87,12 +87,6 @@ export function codeLines(text) {
   return fenceState(text).inside;
 }
 
-function countNewlines(s, end) {
-  let n = 0;
-  for (let i = 0; i < end; i++) if (s[i] === "\n") n++;
-  return n;
-}
-
 /**
  * Remove markers from `text`, leaving marker-shaped strings inside a fenced code
  * block in place (SPEC.md §3.3: they are content, and §8 hashes them with the
@@ -104,14 +98,19 @@ function countNewlines(s, end) {
  */
 export function stripMarkersOutsideCode(text, code, lineOffset = 0) {
   if (!code || code.size === 0) return stripMarkers(text);
-  const re = new RegExp(COMBINED_MARKER_SRC, "gs");
-  const out = [];
-  let prev = 0;
-  for (const m of text.matchAll(re)) {
-    if (code.has(lineOffset + countNewlines(text, m.index) + 1)) continue;
-    out.push(text.slice(prev, m.index));
-    prev = m.index + m[0].length;
+  const ranges = [];
+  for (const record of scanMarkerRecords(text, lineOffset)) {
+    if (record.marker.malformed || code.has(record.marker.line)) continue;
+    const previous = ranges[ranges.length - 1];
+    if (previous && record.start < previous[1]) previous[1] = Math.max(previous[1], record.end);
+    else ranges.push([record.start, record.end]);
   }
-  out.push(text.slice(prev));
+  const out = [];
+  let previous = 0;
+  for (const [start, end] of ranges) {
+    out.push(text.slice(previous, start));
+    previous = end;
+  }
+  out.push(text.slice(previous));
   return out.join("");
 }

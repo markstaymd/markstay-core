@@ -3,6 +3,7 @@
 // `resolve`.
 
 import { bodyHash } from "./hash.js";
+import { isBlockStayMarker } from "./markers.js";
 import { parseDocument } from "./parse.js";
 import { bestMatch, windowPrefix, windowSuffix } from "./quote.js";
 
@@ -45,7 +46,7 @@ export function buildAnchorsFromBlocks(blocks) {
       suffix: windowSuffix(nextText),
     };
     for (const mk of b.markers) {
-      if (mk.id && !mk.malformed) {
+      if (mk.id && isBlockStayMarker(mk)) {
         anchors.push({ id: mk.id, hash: bodyHash(b.content), selector });
       }
     }
@@ -79,7 +80,7 @@ export function resolveOverBlocks(anchors, afterBlocks, opts = {}) {
   const surviving = new Map();
   for (let idx = 0; idx < afterBlocks.length; idx++) {
     for (const mk of afterBlocks[idx].markers) {
-      if (mk.id && !mk.malformed && !surviving.has(mk.id)) surviving.set(mk.id, idx);
+      if (mk.id && isBlockStayMarker(mk) && !surviving.has(mk.id)) surviving.set(mk.id, idx);
     }
   }
 

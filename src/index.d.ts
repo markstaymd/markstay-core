@@ -1,4 +1,4 @@
-// Type declarations for the markstay JS reference implementation (SPEC.md v1.2,
+// Type declarations for the markstay JS reference implementation (SPEC.md v1.6,
 // parser-free core). Hand-written to match the runtime shapes the modules in this
 // directory actually produce; keep in sync with index.js on any surface change.
 
@@ -11,6 +11,10 @@ export interface Marker {
   id: string | null;
   /** Lowercase hex of the stored `hash=sha256:...`, or null when absent. */
   hash: string | null;
+  /** Lowercase hex of a valid bare `subhash=sha256:...`, or null. */
+  subhash: string | null;
+  /** Exact parsed-key presence, even when the subhash value is invalid. */
+  hasSubhash: boolean;
   /** The exact matched marker text, including its delimiters. */
   raw: string;
   /** Which marker grammar matched. */
@@ -21,11 +25,14 @@ export interface Marker {
   malformed: boolean;
 }
 
-/** A segmented content block with the markers bound to it (SPEC.md §5). */
+/** A segmented content block with its lexical marker tokens (SPEC.md §5/§16). */
 export interface Block {
   /** Body with markers removed and ASCII-trimmed; "" for an orphan marker chunk. */
   content: string;
-  /** Markers bound to this block, in document order. */
+  /**
+   * Lexical markers in this block, in document order. A marker carrying
+   * `subhash` is not the stay of this containing block (§16).
+   */
   markers: Marker[];
   /** 1-based start line of the block (or of the orphan marker chunk). */
   line: number;
@@ -139,15 +146,22 @@ export function asciiTrim(s: string): string;
 // --- markers (markers.js, SPEC.md §3 / §4) ---
 
 export function findMarkers(text: string, lineOffset?: number): Marker[];
+/** True when a marker may identify the §5 block containing it. */
+export function isBlockStayMarker(marker: Marker): boolean;
 export function stripMarkers(text: string): string;
 
 /** A marker as seen by `rewriteMarkers`: parsed id/hash plus the raw match. */
 export interface RawMarker {
   id: string | null;
   hash: string | null;
+  subhash: string | null;
+  hasSubhash: boolean;
   /** The exact matched marker text, including delimiters. */
   raw: string;
   syntax: MarkerSyntax;
+  /** 1-based line in the document where the marker starts. */
+  line: number;
+  malformed: false;
   /** The marker body (between the delimiters), e.g. `stay:8f24 hash=sha256:7a9c`. */
   body: string;
 }

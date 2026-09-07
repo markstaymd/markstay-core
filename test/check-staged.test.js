@@ -300,7 +300,7 @@ test("check-worktree is quiet on a stay-preserving edit", () => {
 
 test("check-worktree sees indexed files before the first commit", () => {
   withRepo((repo, write) => {
-    write("broken.md", "Body.\n<!-- stay: -->\n");
+    write("broken.md", "Body.\n<!-- stay:note=hello -->\n");
     git(repo, "add", "broken.md");
     const { code, out } = checkWorktree(repo);
     assert.equal(code, 1, out);

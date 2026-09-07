@@ -81,11 +81,12 @@ test("formatMarker: rejects bad id, non-hex hash, and terminator-bearing values"
   assert.throws(() => formatMarker({ id: "bad id" }));
   assert.throws(() => formatMarker({ id: "ok", hash: "zz" }));
   assert.throws(() => formatMarker({ id: "ok", attrs: { "x-k": "a-->b" } }));
-  assert.throws(() => formatMarker({ id: "ok", attrs: { "x-k": "a*/}b" }, syntax: "mdx" }));
+  assert.throws(() => formatMarker({ id: "ok", attrs: { "x-k": "a--!>b" } }));
+  assert.throws(() => formatMarker({ id: "ok", attrs: { "x-k": "a*/b" }, syntax: "mdx" }));
 });
 
-test("formatAttrValue: rejects characters outside the §4 qchar set", () => {
-  // §4 qchar is printable ASCII only; newline/tab/control/non-ASCII have no form
+test("formatAttrValue: enforces the one-line writer character set", () => {
+  // The reader admits LF in quotes, but the conforming writer stays one-line.
   assert.throws(() => formatMarker({ id: "x", attrs: { "x-v": "line\nbreak" } }));
   assert.throws(() => formatAttrValue("tab\there"));
   assert.throws(() => formatAttrValue("café")); // non-ASCII
@@ -244,6 +245,21 @@ test("restamp: addMissing leaves a subhash marker alone (§5.5)", () => {
   assert.deepEqual(refreshed, []);
 });
 
+test("restamp: arbitrary subhash key and a stale container hash remain untouched (§16)", () => {
+  const md = "- Alpha <!-- stay:k1 subhash=bogus hash=sha256:dead -->\n- Beta\n";
+  const result = restamp(md, { addMissing: true });
+  assert.equal(result.text, md);
+  assert.deepEqual(result.refreshed, []);
+});
+
+test("restamp edits the parsed hash attribute, not hash text inside a quoted value", () => {
+  const result = restamp(
+    'Body.\n<!-- stay:x x-note="hash=sha256:beef" hash=sha256:dead -->\n',
+  );
+  assert.match(result.text, /x-note="hash=sha256:beef"/);
+  assert.doesNotMatch(result.text, /hash=sha256:dead/);
+});
+
 test("stamp: a subhash marker does not make its block stamped (§16)", () => {
   // The other half of the write-path shim. A tool with no child support must not
   // read child markers as evidence the list is done, or the container never gets a
@@ -256,6 +272,14 @@ test("stamp: a subhash marker does not make its block stamped (§16)", () => {
   // and the children are untouched
   assert.ok(text.includes("stay:c1 subhash=sha256:9d2f"));
   assert.ok(text.includes("stay:c2 subhash=sha256:41ac"));
+});
+
+test("stamp: arbitrary subhash value does not make its block stamped (§16)", () => {
+  const md = "A paragraph.\n<!-- stay:c1 subhash=bogus -->\n";
+  const result = stamp(md, { hash: false, newId: () => "parent" });
+  assert.deepEqual(result.minted, [{ id: "parent", line: 2 }]);
+  assert.ok(result.text.includes("stay:c1 subhash=bogus"));
+  assert.ok(result.text.includes("stay:parent"));
 });
 
 test("stamp: a custom key ending in subhash is not the reserved key (§4)", () => {

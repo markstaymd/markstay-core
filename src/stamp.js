@@ -9,7 +9,14 @@
 
 import { bodyHash } from "./hash.js";
 import { parseDocument } from "./parse.js";
-import { findMarkers, rewriteMarkers } from "./markers.js";
+import {
+  findMarkers,
+  insertMarkerHash,
+  isBlockStayMarker,
+  replaceMarkerHash,
+  replaceMarkerId,
+  rewriteMarkers,
+} from "./markers.js";
 import { codeLines, fenceState, stripMarkersOutsideCode } from "./code.js";
 import { blankFrontmatter, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
@@ -23,9 +30,11 @@ export const DEFAULT_HASH_LENGTH = 12;
 const KEY_RE = /^[A-Za-z][A-Za-z0-9_-]*$/; // §4 attribute key grammar
 const HEX_RE = /^[0-9a-fA-F]+$/;
 
-// Closing delimiter per syntax: a written value must never contain it, or it
-// would terminate the marker early.
-const TERMINATOR = { html: "-->", mdx: "*/}" };
+function containsHostCloser(body, syntax) {
+  return syntax === "html"
+    ? body.includes("-->") || body.includes("--!>")
+    : body.includes("*/");
+}
 
 /**
  * Serialize one attribute value (SPEC.md §4): a bare token when it has no
@@ -34,13 +43,13 @@ const TERMINATOR = { html: "-->", mdx: "*/}" };
  */
 export function formatAttrValue(value) {
   const s = String(value);
-  // §4 qchar: a value may only contain printable ASCII (0x20-0x7E); `"` and `\`
-  // are escaped in the quoted form. A newline or other control character has no
-  // representation and would corrupt the marker, so reject rather than emit it.
+  // Readers admit normalized LF inside quoted values, but §3.3 requires writers
+  // to emit one-line markers. The writer subset is therefore printable ASCII;
+  // `"` and `\` are escaped in its quoted form.
   if (!/^[\x20-\x7E]*$/.test(s)) {
     throw new Error(
       `formatAttrValue: value ${JSON.stringify(s)} contains a character outside ` +
-        "the §4 qchar set (printable ASCII 0x20-0x7E)"
+        "the one-line writer set (printable ASCII 0x20-0x7E)"
     );
   }
   if (s.length > 0 && /^[\x21-\x7E]+$/.test(s) && !s.includes('"')) return s;
@@ -77,10 +86,9 @@ export function formatMarker({ id, hash = null, attrs = null, syntax = "html" } 
     if (!KEY_RE.test(k)) throw new Error(`formatMarker: invalid attribute key ${JSON.stringify(k)}`);
     body += ` ${k}=${formatAttrValue(v)}`;
   }
-  if (body.includes(TERMINATOR[syntax])) {
+  if (containsHostCloser(body, syntax)) {
     throw new Error(
-      `formatMarker: a value contains the ${syntax} terminator ${JSON.stringify(TERMINATOR[syntax])}, ` +
-        `which would break the marker`
+      `formatMarker: a value contains a ${syntax} host-comment closer, which would break the marker`
     );
   }
   return syntax === "mdx" ? `{/* ${body} */}` : `<!-- ${body} -->`;
@@ -113,20 +121,6 @@ function uniqueMinter(used, newId) {
  *
  * Returns { text, minted: [{ id, line }] }. Line endings are normalized to LF.
  */
-/**
- * True when a marker carries the reserved `subhash` key (SPEC.md §4, §5.5), which
- * addresses a list item rather than the block around it.
- *
- * The boundary is whitespace, not `\b`. An attribute is a whitespace-separated token
- * (§4), and `\b` accepts a custom key merely ENDING in the reserved one, because a
- * hyphen is not a word character: `x-subhash=sha256:ab` would read as `subhash` and
- * this tool would act on an attribute §4 tells it to preserve and ignore. Nothing
- * conforming loses by the tighter rule, since every attribute follows whitespace.
- */
-function carriesSubhash(raw) {
-  return /(?<![^\s])subhash\s*=\s*sha256:[0-9a-fA-F]+/.test(raw);
-}
-
 export function stamp(md, opts = {}) {
   const {
     syntax = "html",
@@ -171,7 +165,7 @@ export function stamp(md, opts = {}) {
     // child-stamped list never gets a stay of its own.
     const hasId = findMarkers(chunk, startLine - 1).some(
       // §3.3: an example never stamps its block.
-      (mk) => mk.id && !mk.malformed && !carriesSubhash(mk.raw) && !code.has(mk.line),
+      (mk) => mk.id && isBlockStayMarker(mk) && !code.has(mk.line),
     );
     if (content !== "") {
       const nLines = chunk.split("\n").length;
@@ -239,7 +233,9 @@ export function restamp(md, opts = {}) {
   for (const b of parseDocument(norm)) {
     if (b.index < 0) continue;
     for (const mk of b.markers) {
-      if (mk.id && !mk.malformed && !contentById.has(mk.id)) contentById.set(mk.id, b.content);
+      if (mk.id && isBlockStayMarker(mk) && !contentById.has(mk.id)) {
+        contentById.set(mk.id, b.content);
+      }
     }
   }
 
@@ -248,28 +244,19 @@ export function restamp(md, opts = {}) {
   // rewriting its `hash=` to the digest of the fence around it is the defect that
   // opened the rule.
   const text = rewriteMarkers(norm, (mk) => {
-    if (!mk.id || !contentById.has(mk.id)) return null;
+    if (!mk.id || !isBlockStayMarker(mk) || !contentById.has(mk.id)) return null;
     const content = contentById.get(mk.id);
     if (mk.hash !== null) {
       const len = hashLength ?? mk.hash.length;
       const now = bodyHash(content, len);
       if (now === mk.hash) return null; // unchanged at this precision
       refreshed.push(mk.id);
-      // The whitespace boundary mirrors the read-path HASH_RE: without it the
-      // replace false-matches the `hash` inside a custom key (`rehash`, `x-hash`) and
-      // corrupts a §4-preserved key.
-      return mk.raw.replace(
-        /(?<![^\s])hash\s*=\s*sha256:[0-9a-fA-F]+/,
-        `hash=sha256:${now}`,
-      );
+      return replaceMarkerHash(mk.raw, now);
     }
     if (addMissing) {
-      // SPEC.md §5.5: a marker carrying `subhash` addresses a list item, never
-      // the block around it, so the block's digest must not be added beside it.
-      if (carriesSubhash(mk.raw)) return null;
       const now = bodyHash(content, hashLength ?? DEFAULT_HASH_LENGTH);
       refreshed.push(mk.id);
-      return mk.raw.replace(/(stay:\s*[A-Za-z0-9_-]+)/, `$1 hash=sha256:${now}`);
+      return insertMarkerHash(mk.raw, now);
     }
     return null;
   }, codeLines(blankFrontmatter(norm)));
@@ -317,7 +304,7 @@ export function repairDuplicates(md, opts = {}) {
     if (c === 1) return null; // first occurrence keeps the id
     const fresh = nextId();
     renamed.push({ from: mk.id, to: fresh });
-    return mk.raw.replace(/stay:\s*[A-Za-z0-9_-]+/, `stay:${fresh}`);
+    return replaceMarkerId(mk.raw, fresh);
   }, codeLines(blankFrontmatter(norm)));
   return { text, renamed };
 }

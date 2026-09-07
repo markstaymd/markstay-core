@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.5-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.6-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.5), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.6), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -18,12 +18,13 @@ It covers both halves of the spec, the read side (parse / lint / resolve) and th
 write side (mint ids, stamp a document, refresh hashes, repair duplicates). The
 CommonMark-tree (§5.2) mdast adapter ships separately as `remark-stay`.
 
-**Child-block identity (§5.5) is not implemented here.** Version 1.3 lets a direct list
-item carry its own stay under the reserved `subhash` key, and §16 makes segmenting and
-resolving those **optional**. What §16 makes mandatory for every tool is the write-path
-shim, which this package honours: a `subhash` marker is preserved verbatim, never given
-a container hash, and never counted as its block's stay. The Python reference implements
-the section itself.
+**Child-block identity (§5.5 and §5.6) is not implemented here.** Version 1.3 lets a
+direct list item carry its own stay under the reserved `subhash` key; version 1.6
+does the same for a GFM table body row. Section 16 makes segmenting and resolving
+those **optional**. Its mandatory compatibility layer is parser-free: an exact
+`subhash` key, even with an invalid digest, is preserved verbatim, is never given a
+container hash, and is never reported as its containing block's stay. The Python
+reference implements child segmentation and resolution.
 
 ## Install
 
@@ -144,9 +145,10 @@ Hello world.
 src/
   ratio.js     SequenceMatcher.ratio over Unicode code points (the §9 crux)
   hash.js      §8 normalization + SHA-256 body hashing
-  markers.js   §3/§4 marker grammar + discovery
+  markers.js   §3/§4 strict host-first marker grammar + discovery
+  code.js      §3.3 fenced-code mask (a marker in a fence is content)
   segment.js   §5 blank-line block segmentation
-  parse.js     §5 document -> content blocks with attached markers
+  parse.js     §5 document -> content blocks with lexical marker tokens
   lint.js      §7/§8/§10 lint + §11 regeneration diff
   quote.js     §9 quote/selector scoring (body score, context bonus, best match)
   resolve.js   §9.1 resolution ladder (MARKER -> HASH -> QUOTE -> DETACHED)
@@ -159,6 +161,7 @@ bin/
   cli.js       the `markstay` CLI (preserve / lint / check / write verbs)
 test/
   conformance.test.js   runs the shared corpus (conformance/)
+  markers.test.js       strict §4 discovery, host close, and raw-preservation tests
   unit.test.js          behavioral ports of the Python reference's lint/attach tests
   stamp.test.js         write-path invariants (stamp/restamp/repair, idempotence)
 ```
@@ -166,7 +169,8 @@ test/
 ## Public API
 
 Read side (mirrors the Python reference surface): `normalizeBody`, `bodyHash`,
-`asciiTrim`, `findMarkers`, `stripMarkers`, `segmentBlankLine`, `parseDocument`,
+`asciiTrim`, `findMarkers`, `isBlockStayMarker`, `stripMarkers`, `fenceState`, `codeLines`,
+`stripMarkersOutsideCode`, `segmentBlankLine`, `parseDocument`,
 `lintDocument`, `lintDiff`, `sortFindings`, `hasErrors`, `ratio`, `matchingBlocks`,
 `normalize`, `quoteRatio`, `bodyScore`, `contextBonus`, `bestMatch`,
 `buildAnchors`, `resolve`.
@@ -210,30 +214,35 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The shared corpus contributes 408 cross-language assertions; CLI and unit tests
+The shared corpus contributes 420 cross-language assertions; CLI and unit tests
 cover the Git adapter, rendering, and write-path invariants around it.
 
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **408 vectors** across two tiers:
+reference. **420 core vectors** across two tiers, plus an optional `rows` profile
+(SPEC.md §5.6 table-row identity, 23 vectors) that this reference **declines**:
+§16 keeps child segmentation optional and this implementation does not segment
+child blocks. Declining is a declared, asserted state rather than a silent skip,
+so the runner fails if the profile disappears from the corpus, if its vector count
+changes, or if a profile it has never heard of turns up.
 
 | category | spec | gen | covers |
 |----------|-----:|----:|--------|
 | hash     | 10   | 14  | §8 ASCII normalization + SHA-256 + truncation (incl. NBSP kept) |
-| markers  | 9    | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex |
+| markers  | 16   | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex |
 | parse    | 50   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion, the thematic-break spans it must not eat, and §3.3's fenced-code mask |
-| lint     | 11   | 8   | §7/§8/§10 findings (ordered) |
-| diff     | 6    | 6   | §11 regeneration diff (ordered) |
+| lint     | 12   | 8   | §7/§8/§10 findings (ordered) |
+| diff     | 7    | 6   | §11 regeneration diff (ordered) |
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
 | score    | 12   | 19  | §9 wrappers: body score, context bonus, best match, ASCII fold |
-| resolve  | 25   | 9   | §9.1 ladder + margin guard |
-| anchors  | 3    | 0   | §9 selector storage, which resolution cannot see |
+| resolve  | 26   | 9   | §9.1 ladder + margin guard |
+| anchors  | 4    | 0   | §9 selector storage, which resolution cannot see |
 | mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
 | stamp    | 9    | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule |
 | preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
-| check    | 13   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
-| **total**| **168** | **240** | |
+| check    | 14   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
+| **total**| **180** | **240** | |
 
 The `preserve` row is the odd one and deliberately so: it holds plain prose rather
 than a computation. Each implementation carries its own copy of the §11 instruction
@@ -291,6 +300,27 @@ change to either implementation that breaks agreement fails one of them.
   and the content below it, blank-line segmentation reads one run and binds the
   marker to that content, so it is live rather than orphaned and deleting it drops
   a working id.
+- **Text inside a fenced code block is content, not markup (§3.3):** a
+  marker-shaped string there identifies no block, stays in the hashed body, and
+  never makes its block stamped; a writer will not put one there either. That is
+  what lets a document *about* markstay show its own markers in examples, which is
+  the document the rule exists for. Recognition is a line scan applied once over
+  the whole document, on the frontmatter precedent, because neither segmenter has a
+  concept of a fence: at most three leading **spaces** (a tab is not one of them,
+  since CommonMark expands it against a column model this rule deliberately does
+  not have), then three or more backticks or tildes, closed by the first later line
+  that is a run of the same character at least as long, followed by nothing but
+  spaces and tabs. An unclosed fence runs to the end of the document, and a
+  backtick fence's info string may not contain a backtick. **Its limit is stated
+  rather than hidden**: a fence indented four spaces or carrying a blockquote or
+  list-item prefix on the opening line is invisible to the line scan, so a marker
+  after it can go silent. It fails closed (nothing is compared, the block just
+  looks unstamped) rather than corrupting anything. **Inline code spans are
+  deliberately out of scope**: a marker mangled into a span is still one a tool can
+  see, which beats one that has silently stopped existing. **Migration:** a
+  document whose body gained a fenced marker-shaped string drifts once and a
+  `restamp` clears it; a fence whose only marker was an example is now unstamped
+  and takes a fresh stay on the next `stamp`.
 - **Positional id (§4):** the id is the first token after `stay:` (`^`-anchored);
   a marker whose first token is a bare `k=v` is malformed even if a later
   `stay:ID` appears in the body, matching the Python reference's `ID_RE.match`.

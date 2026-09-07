@@ -52,6 +52,17 @@ const blockDict = (b) => ({
   orphan: b.index === -1,
 });
 
+// Phase 2 adds parsed key-presence fields to the public Marker. Keep the v1.5
+// corpus projection stable until the v1.6 vectors change the shared schema.
+const markerDict = (m) => ({
+  id: m.id,
+  hash: m.hash,
+  raw: m.raw,
+  syntax: m.syntax,
+  line: m.line,
+  malformed: m.malformed,
+});
+
 const findingDict = (f, withLine) =>
   withLine
     ? { level: f.level, code: f.code, id: f.id ?? null, line: f.line ?? null }
@@ -72,7 +83,7 @@ function vHash(v) {
 }
 
 function vMarkers(v) {
-  const got = findMarkers(v.text);
+  const got = findMarkers(v.text).map(markerDict);
   return { ok: approx(got, v.markers), got };
 }
 
@@ -226,9 +237,23 @@ const VERIFIERS = {
 
 // --- drive the corpus ------------------------------------------------------
 
+// Optional profiles a corpus file may declare with a top-level `profile` key.
+// Every full runner knows the whole set; each advertises only what it
+// implements. A profile this runner has never HEARD of is a failure rather than
+// a skip, so a category added to the corpus without touching the runners cannot
+// pass as silence.
+//
+// §16 keeps §5.5 and §5.6 child segmentation OPTIONAL, and only the Python
+// reference implements it, so declining `rows` is conforming. Running 419 of
+// the 420 core vectors would not be, which is why the core count is asserted
+// below rather than left to whatever happens to be on disk.
+const KNOWN_PROFILES = new Set(["rows"]);
+const ADVERTISED_PROFILES = new Set();
+const CORE_VECTORS = 420;
+
 function corpusFiles() {
   const files = [];
-  for (const tier of ["spec", "gen"]) {
+  for (const tier of ["spec", "gen", "rows"]) {
     const dir = join(CORPUS, tier);
     let names;
     try {
@@ -243,21 +268,54 @@ function corpusFiles() {
   return files;
 }
 
-const files = corpusFiles();
-assert.ok(files.length > 0, "no corpus files found under conformance/spec or conformance/gen");
+const all = corpusFiles().map((f) => ({
+  ...f,
+  data: JSON.parse(readFileSync(f.path, "utf8")),
+}));
+assert.ok(all.length > 0, "no corpus files found under conformance/spec or conformance/gen");
+
+const unknownProfile = all.filter(
+  ({ data }) => data.profile != null && !KNOWN_PROFILES.has(data.profile),
+);
+const files = all.filter(
+  ({ data }) => data.profile == null || ADVERTISED_PROFILES.has(data.profile),
+);
+const declinedFiles = all.filter(
+  ({ data }) =>
+    data.profile != null &&
+    KNOWN_PROFILES.has(data.profile) &&
+    !ADVERTISED_PROFILES.has(data.profile),
+);
+
+test("no corpus file declares a profile this runner has never heard of", () => {
+  assert.deepEqual(
+    unknownProfile.map(({ data }) => data.profile),
+    [],
+    "a new optional profile must be added to KNOWN_PROFILES, then advertised or " +
+      "deliberately declined; silently skipping it is the failure this asserts",
+  );
+});
+
+test("every core vector runs here, and every declined one is accounted for", () => {
+  const core = files.reduce((n, { data }) => n + data.vectors.length, 0);
+  assert.equal(core, CORE_VECTORS, "core corpus vector count");
+  const declined = declinedFiles.map(
+    ({ data }) => `${data.profile}:${data.vectors.length}`,
+  );
+  assert.deepEqual(declined, ["rows:23"], "declined optional profiles");
+});
 
 // A verifier with no vectors is a check that silently is not running, and the
 // hundreds of unrelated vectors keep the suite green while it does nothing. That
 // is the failure class this project exists to catch, so a category missing from
 // the corpus fails here rather than passing quietly.
 test("every verifier has vectors in the corpus", () => {
-  const seen = new Set(files.map(({ path }) => JSON.parse(readFileSync(path, "utf8")).category));
+  const seen = new Set(files.map(({ data }) => data.category));
   const missing = Object.keys(VERIFIERS).filter((c) => !seen.has(c)).sort();
   assert.deepEqual(missing, [], `verifiers with no vectors: ${missing.join(", ")}`);
 });
 
-for (const { tier, path } of files) {
-  const data = JSON.parse(readFileSync(path, "utf8"));
+for (const { tier, data } of files) {
   const verify = VERIFIERS[data.category];
   test(`${tier}/${data.category}`, async (t) => {
     assert.ok(verify, `unknown category: ${data.category}`);
