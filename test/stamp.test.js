@@ -104,6 +104,33 @@ Second paragraph.
 - b
 `;
 
+test("stamp: explicit blank-line mode matches the default", () => {
+  assert.deepEqual(
+    stamp(DOC, { mode: "blank-line", newId: counter() }),
+    stamp(DOC, { newId: counter() }),
+  );
+});
+
+test("stamp: unsupported modes match parseDocument's error before minting", () => {
+  for (const mode of ["commonmark", "bogus", "", null, false]) {
+    for (const doc of [DOC, "", "Body.\n<!-- stay:existing -->"]) {
+      let minted = 0;
+      assert.throws(
+        () => stamp(doc, { mode, newId: () => `unexpected${minted++}` }),
+        (error) => {
+          assert.match(error.message, /^unknown parse mode:/);
+          assert.throws(() => parseDocument(doc, mode), {
+            name: error.name,
+            message: error.message,
+          });
+          return true;
+        },
+      );
+      assert.equal(minted, 0);
+    }
+  }
+});
+
 test("stamp: marks every unmarked block, leaves bodies unchanged, lints clean", () => {
   const before = bodies(DOC);
   const { text, minted } = stamp(DOC, { newId: counter() });

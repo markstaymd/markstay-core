@@ -113,6 +113,7 @@ function uniqueMinter(used, newId) {
  * Blocks that already carry a well-formed id are left untouched.
  *
  * Options:
+ *   mode        "blank-line" (default); other parse modes are rejected
  *   syntax      "html" (default) or "mdx"
  *   hash        include a `hash` (default true)
  *   hashLength  hex prefix length for the written hash (default 12)
@@ -123,6 +124,7 @@ function uniqueMinter(used, newId) {
  */
 export function stamp(md, opts = {}) {
   const {
+    mode = "blank-line",
     syntax = "html",
     hash = true,
     hashLength = DEFAULT_HASH_LENGTH,
@@ -131,6 +133,9 @@ export function stamp(md, opts = {}) {
     alphabet,
     random,
   } = opts;
+
+  // Share the parser's rejection without parsing a supported document twice.
+  if (mode !== "blank-line") parseDocument(md, mode);
 
   const norm = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = norm.split("\n");

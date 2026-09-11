@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.6-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.7-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.6), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.7), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -25,6 +25,14 @@ those **optional**. Its mandatory compatibility layer is parser-free: an exact
 `subhash` key, even with an invalid digest, is preserved verbatim, is never given a
 container hash, and is never reported as its containing block's stay. The Python
 reference implements child segmentation and resolution.
+
+**Write safety (§3.4, v1.7).** `stamp` inserts new markers on marker-only lines.
+It never emits a list-item or table-row carrier, and never relocates a table's
+container marker, so the carrier refusals in §3.4 and §5.6 cannot be reached here.
+Refreshing a hash or repairing an id keeps an existing same-line marker in place,
+as §3.4 permits. The §16 compatibility rules above still apply to child-stamped
+input. The optional `OUTSIDE_SUBSET` advisory requires a §5.2 parser and is not
+implemented by this parser-free core.
 
 ## Install
 
@@ -183,6 +191,7 @@ Write side (string-level, parser-free):
   with `formatAttrValue` and `rewriteMarkers` as the lower-level pieces.
 - `stamp(md, opts?)` , mint an id for every unmarked block and append its trailing
   marker. Returns `{ text, minted }`; never alters block bodies and is idempotent.
+  `mode` defaults to `"blank-line"`; any other mode is rejected, as in `parseDocument`.
 - `restamp(md, opts?)` , refresh hashes that drifted (the deliberate "I edited
   this on purpose" step); `{ addMissing: true }` adds a hash to markers lacking one.
 - `repairDuplicates(md, opts?)` , the first block keeps a duplicated id, every
@@ -221,7 +230,8 @@ cover the Git adapter, rendering, and write-path invariants around it.
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
 reference. **420 core vectors** across two tiers, plus an optional `rows` profile
-(SPEC.md §5.6 table-row identity, 23 vectors) that this reference **declines**:
+(SPEC.md §5.6 table-row identity and §3.4 carrier refusals, 31 vectors) that this
+reference **declines**:
 §16 keeps child segmentation optional and this implementation does not segment
 child blocks. Declining is a declared, asserted state rather than a silent skip,
 so the runner fails if the profile disappears from the corpus, if its vector count
