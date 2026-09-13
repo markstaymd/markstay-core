@@ -302,7 +302,7 @@ test("every core vector runs here, and every declined one is accounted for", () 
   const declined = declinedFiles.map(
     ({ data }) => `${data.profile}:${data.vectors.length}`,
   );
-  assert.deepEqual(declined, ["rows:31"], "declined optional profiles");
+  assert.deepEqual(declined, ["rows:32"], "declined optional profiles");
 });
 
 // A verifier with no vectors is a check that silently is not running, and the
