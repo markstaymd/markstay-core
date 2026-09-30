@@ -6,7 +6,7 @@
 
 import { hasErrors, lintDiff, lintDocument } from "./lint.js";
 import { parseDocument } from "./parse.js";
-import { idIndex } from "./lint.js";
+import { idIndex, stayMarkerIds } from "./lint.js";
 
 const MD_RE = /\.(md|markdown)$/;
 
@@ -20,6 +20,12 @@ export function isMarkdown(path) {
 
 const idsOf = (text) =>
   text == null ? new Set() : new Set(idIndex(parseDocument(text)).keys());
+
+// Every id any marker carries, child markers included, so a child stay moved to
+// another staged file is still in the commit (SPEC.md §16, v1.9). Only the move
+// check reads this; baseline pairing stays on block ids.
+const carriedBy = (text) =>
+  new Set(stayMarkerIds(parseDocument(text)).map(([id]) => id));
 
 /**
  * Check commit-shaped entries without reading Git or the filesystem.
@@ -38,8 +44,9 @@ export function checkEntries(entries, { scope = [] } = {}) {
 
   const stagedText = new Map(changed.map((e) => [e.dst, e.after ?? ""]));
   const stagedIds = new Map([...stagedText].map(([p, t]) => [p, idsOf(t)]));
+  const stagedCarried = new Map([...stagedText].map(([p, t]) => [p, carriedBy(t)]));
   const committedIds = new Set();
-  for (const ids of stagedIds.values()) for (const id of ids) committedIds.add(id);
+  for (const ids of stagedCarried.values()) for (const id of ids) committedIds.add(id);
 
   const deletedIds = new Map(deleted.map((e) => [e.src, idsOf(e.before)]));
   const deletedText = new Map(deleted.map((e) => [e.src, e.before]));
@@ -85,11 +92,14 @@ export function checkEntries(entries, { scope = [] } = {}) {
 
     const kept = [];
     for (const finding of findings) {
-      if (finding.code === "DROPPED_ID" && committedIds.has(finding.id)) {
-        const elsewhere = [...stagedIds]
-          .filter(([path, ids]) => path !== entry.dst && ids.has(finding.id))
-          .map(([path]) => path)
-          .sort();
+      // A move needs another staged file carrying the id: this file's own
+      // markers never excuse a drop reported against it.
+      const elsewhere = [...stagedCarried]
+        .filter(([path, ids]) => path !== entry.dst && ids.has(finding.id))
+        .map(([path]) => path)
+        .sort();
+      if ((finding.code === "DROPPED_ID" || finding.code === "DROPPED_CHILD_ID")
+          && elsewhere.length) {
         result.notes.push(`${finding.id}: moved out of ${origin ?? entry.dst} into `
           + `${elsewhere.join(", ")} (still in this commit, not blocking)`);
         continue;

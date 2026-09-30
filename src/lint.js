@@ -101,6 +101,24 @@ export function idIndex(blocks) {
 }
 
 /**
+ * Every well-formed marker on a content block as [id, hasSubhash], in document
+ * order. Lexical rather than attached-stay semantics: it answers "does any
+ * marker still carry this id", which is the §16 (v1.9) drop check for a child
+ * stay and needs no §5.5 or §5.6 segmentation. Orphan chunks are included: an
+ * orphan marker still carries its id, and the single-document lint reports the
+ * position as ORPHAN_MARKER.
+ */
+export function stayMarkerIds(blocks) {
+  const out = [];
+  for (const b of blocks) {
+    for (const mk of b.markers) {
+      if (mk.id && !mk.malformed) out.push([mk.id, mk.hasSubhash === true]);
+    }
+  }
+  return out;
+}
+
+/**
  * Regeneration diff (SPEC.md §11): what an edit did to the ids. Catches the
  * AI-rewrite failure mode (dropped markers) plus duplication and exact-content
  * relocation. Returns findings in detection order.
@@ -176,6 +194,25 @@ export function lintDiffBlocks(beforeBlocks, afterBlocks) {
       findings.push(
         finding("warn", "HASH_DRIFT",
           `id ${mid}: content changed between versions (edited in place)`, mid)
+      );
+    }
+  }
+
+  // SPEC.md §16 (v1.9): a child stay is a stay, so its loss is reported too,
+  // under its own code so the reader rule holds (a `subhash` marker is never
+  // reported as its container's stay). Lexical: the id sat on exactly one
+  // marker in the baseline, that marker carried `subhash`, and no marker of any
+  // kind carries it after the edit.
+  const beforeMarkers = stayMarkerIds(beforeBlocks);
+  const counts = new Map();
+  for (const [mid] of beforeMarkers) counts.set(mid, (counts.get(mid) ?? 0) + 1);
+  const afterIds = new Set(stayMarkerIds(afterBlocks).map(([mid]) => mid));
+  for (const [mid, child] of beforeMarkers) {
+    if (child && counts.get(mid) === 1 && !afterIds.has(mid)) {
+      findings.push(
+        finding("error", "DROPPED_CHILD_ID",
+          `child id ${mid} was in the baseline but no marker carries it after the edit ` +
+            `(silent loss)`, mid)
       );
     }
   }

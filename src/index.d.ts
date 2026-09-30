@@ -1,4 +1,4 @@
-// Type declarations for the markstay JS reference implementation (SPEC.md v1.7,
+// Type declarations for the markstay JS reference implementation (SPEC.md v1.9,
 // parser-free core). Hand-written to match the runtime shapes the modules in this
 // directory actually produce; keep in sync with index.js on any surface change.
 

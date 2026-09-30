@@ -138,9 +138,14 @@ test("diff treats an in-place edit as drift, not relocation", () => {
   assert.deepEqual(codes(lintDiff(before, after)), ["HASH_DRIFT"]);
 });
 
-test("diff ignores child ids as container identity", () => {
+test("diff reports a lost child id as a child drop, never as container identity", () => {
   const before = "Body.\n<!-- stay:child subhash=bogus -->\n";
-  assert.deepEqual(lintDiff(before, "Body.\n"), []);
+  assert.deepEqual(
+    lintDiff(before, "Body.\n").map((f) => [f.level, f.code, f.id]),
+    [["error", "DROPPED_CHILD_ID", "child"]]
+  );
+  // Kept on the item it moved to, or carried by any marker at all, it is not lost.
+  assert.deepEqual(lintDiff(before, "Body.\n<!-- stay:child -->\n").map((f) => f.code), ["NEW_ID"]);
 });
 
 // --- resolver ladder (ported / adapted from test_attach.py) ---------------
