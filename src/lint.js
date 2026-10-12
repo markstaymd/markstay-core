@@ -5,6 +5,7 @@
 import { bodyHash } from "./hash.js";
 import { isBlockStayMarker } from "./markers.js";
 import { parseDocument } from "./parse.js";
+import { adoptedIds } from "./adoption.js";
 
 const LEVELS = { error: 0, warn: 1, info: 2 };
 
@@ -124,15 +125,24 @@ export function stayMarkerIds(blocks) {
  * relocation. Returns findings in detection order.
  */
 export function lintDiff(beforeMd, afterMd, mode = "blank-line") {
-  return lintDiffBlocks(parseDocument(beforeMd, mode), parseDocument(afterMd, mode));
+  const beforeBlocks = parseDocument(beforeMd, mode);
+  const afterBlocks = parseDocument(afterMd, mode);
+  return lintDiffBlocks(beforeBlocks, afterBlocks, {
+    adopted: (gone) => adoptedIds(beforeMd, afterMd, gone),
+  });
 }
 
 /**
  * Regeneration diff over two pre-segmented block lists (the segmentation-neutral
  * core of `lintDiff`). The blank-line front end and the tree adapter both build
  * their before/after blocks and call this, so the diff verdict is single-sourced.
+ *
+ * `opts.adopted(ids)` answers SPEC.md §16's (v1.10) in-place adoption test for
+ * the ids that would otherwise be dropped, returning the Set kept. The test
+ * reads source, which blocks do not carry, so each front end supplies it;
+ * without it every such id is a drop.
  */
-export function lintDiffBlocks(beforeBlocks, afterBlocks) {
+export function lintDiffBlocks(beforeBlocks, afterBlocks, opts = {}) {
   const beforeIdx = idIndex(beforeBlocks);
   const before = new Map();
   for (const [mid, blks] of beforeIdx) {
@@ -141,8 +151,19 @@ export function lintDiffBlocks(beforeBlocks, afterBlocks) {
   const after = idIndex(afterBlocks);
   const findings = [];
 
-  for (const mid of before.keys()) {
-    if (!after.has(mid)) {
+  const gone = [...before.keys()].filter((mid) => !after.has(mid));
+  // SPEC.md §16 (v1.10): a block stay rewritten in place as its list item's
+  // child stay is kept, and said so: the test is lexical, so a shape it
+  // misjudges is printed rather than passed in silence.
+  const adopted = gone.length && opts.adopted ? opts.adopted(gone) : new Set();
+  for (const mid of gone) {
+    if (adopted.has(mid)) {
+      findings.push(
+        finding("warn", "ADOPTED_ID",
+          `id ${mid} was rewritten in place as a child stay and is kept; ` +
+            `check it sits on the list item it names`, mid)
+      );
+    } else {
       findings.push(
         finding("error", "DROPPED_ID",
           `id ${mid} was in the baseline but is gone after the edit (silent loss)`, mid)

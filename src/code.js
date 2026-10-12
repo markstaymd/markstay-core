@@ -15,7 +15,9 @@ import { scanMarkerRecords, stripMarkers } from "./markers.js";
 
 // An opening fence may carry an info string; a *closing* fence may not, and a
 // backtick fence's info string may not contain a backtick (CommonMark 4.5).
-const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+// `[\s\S]*` rather than `.*`: ECMAScript's `.` stops at U+2028 and U+2029,
+// which Python's and Rust's info-string readers accept.
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})([\s\S]*)$/;
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 
 /**

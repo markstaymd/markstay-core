@@ -1,4 +1,4 @@
-// Type declarations for the markstay JS reference implementation (SPEC.md v1.9,
+// Type declarations for the markstay JS reference implementation (SPEC.md v1.10,
 // parser-free core). Hand-written to match the runtime shapes the modules in this
 // directory actually produce; keep in sync with index.js on any surface change.
 
@@ -285,7 +285,31 @@ export function lintDocument(
   mode?: ParseMode
 ): { blocks: Block[]; findings: Finding[] };
 export function lintDiff(beforeMd: string, afterMd: string, mode?: ParseMode): Finding[];
-export function lintDiffBlocks(beforeBlocks: Block[], afterBlocks: Block[]): Finding[];
+export interface LintDiffBlocksOptions {
+  /**
+   * SPEC.md §16 (v1.10): given the ids that would be dropped, return the ones
+   * whose block stay was rewritten in place as a child stay. They are reported
+   * as the warning `ADOPTED_ID` instead of `DROPPED_ID`.
+   */
+  adopted?: (ids: string[]) => Set<string>;
+}
+export function lintDiffBlocks(
+  beforeBlocks: Block[],
+  afterBlocks: Block[],
+  opts?: LintDiffBlocksOptions
+): Finding[];
+export interface AdoptedIdsOptions {
+  /** The caller's segmenter over the normalized text, in place of blank-line. */
+  segmentBefore?: (text: string) => Chunk[];
+  segmentAfter?: (text: string) => Chunk[];
+}
+/** SPEC.md §16 (v1.10): which of `ids` were rewritten in place as child stays. */
+export function adoptedIds(
+  beforeMd: string,
+  afterMd: string,
+  ids: Iterable<string>,
+  opts?: AdoptedIdsOptions
+): Set<string>;
 export function sortFindings(findings: Finding[]): Finding[];
 export function hasErrors(findings: Finding[]): boolean;
 

@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.9-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.10-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.9), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.10), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -223,13 +223,13 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The shared corpus contributes 430 cross-language assertions; CLI and unit tests
+The shared corpus contributes 469 cross-language assertions; CLI and unit tests
 cover the Git adapter, rendering, and write-path invariants around it.
 
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **430 core vectors** across two tiers, plus an optional `rows` profile
+reference. **469 core vectors** across two tiers, plus an optional `rows` profile
 (SPEC.md §5.6 table-row identity and §3.4 carrier refusals, 32 vectors) that this
 reference **declines**:
 §16 keeps child segmentation optional and this implementation does not segment
@@ -243,7 +243,7 @@ changes, or if a profile it has never heard of turns up.
 | markers  | 16   | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex |
 | parse    | 50   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion, the thematic-break spans it must not eat, and §3.3's fenced-code mask |
 | lint     | 12   | 8   | §7/§8/§10 findings (ordered) |
-| diff     | 14   | 6   | §11 regeneration diff (ordered) |
+| diff     | 50   | 6   | §11 regeneration diff (ordered) |
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
 | score    | 12   | 19  | §9 wrappers: body score, context bonus, best match, ASCII fold |
 | resolve  | 26   | 9   | §9.1 ladder + margin guard |
@@ -251,8 +251,8 @@ changes, or if a profile it has never heard of turns up.
 | mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
 | stamp    | 9    | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule |
 | preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
-| check    | 17   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
-| **total**| **190** | **240** | |
+| check    | 20   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
+| **total**| **229** | **240** | |
 
 The `preserve` row is the odd one and deliberately so: it holds plain prose rather
 than a computation. Each implementation carries its own copy of the §11 instruction

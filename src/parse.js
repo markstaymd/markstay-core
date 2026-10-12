@@ -19,7 +19,7 @@ function markerFacts(record) {
   ];
 }
 
-function documentMarkerRecords(md, normalized, text) {
+export function documentMarkerRecords(md, normalized, text) {
   const normalizedLines = normalized.split("\n");
   const blankedLines = text.split("\n");
   const frontmatterLines = new Set();
@@ -41,13 +41,13 @@ function documentMarkerRecords(md, normalized, text) {
   }));
 }
 
-function lineStarts(text) {
+export function lineStarts(text) {
   const starts = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === "\n") starts.push(i + 1);
   return starts;
 }
 
-function stripRecordRanges(chunk, records, sourceStart) {
+export function stripRecordRanges(chunk, records, sourceStart) {
   const sourceEnd = sourceStart + chunk.length;
   const spans = [];
   for (const record of records) {
