@@ -61,8 +61,13 @@ const YAMLISH_LINE = /^[ \t]*(?:-[ \t]+[^\x00-\x20\x7f]|[^\x00-\x20\x7f:#][^:]*:
  * setext heading under one. Both satisfy all four conditions and their content *is*
  * excluded. Frontmatter wins, the same call every mainstream site generator makes.
  * A document that fails any of the four conditions falls through to ordinary
- * Markdown, where the worst case is that frontmatter is not skipped (a stray
- * hash-drift warning) rather than content being silently discarded.
+ * Markdown. For a reader the worst case is that frontmatter is not skipped (a
+ * stray hash-drift warning) rather than content being silently discarded. For a
+ * writer it is worse, and one shape is refused rather than written: a span that
+ * fails condition 3 only for a blank line while condition 4 holds is still YAML to
+ * every tool that reads frontmatter, and a marker stamped into it breaks that
+ * YAML. See `frontmatterWriteRefusal`, which leaves this function, and so
+ * recognition, unchanged.
  *
  * Lines are replaced one-for-one with empty lines, so every line number the caller
  * reports is unchanged. Internal: not part of the package's public API.
@@ -78,6 +83,38 @@ export function blankFrontmatter(text) {
     return [...Array(i + 1).fill(""), ...lines.slice(i + 1)].join("\n");
   }
   return text;
+}
+
+/**
+ * The last line of a leading span a writer must not write into (SPEC.md §5.3,
+ * v1.11), or `null`. `text` is LF-normalized. Port of `frontmatter_write_refusal`
+ * from impl/py/src/markstay/lint.py.
+ *
+ * The span is one `blankFrontmatter` rejects, so readers segment it as ordinary
+ * Markdown, and rejects only on condition 3 for a blank line: line 1 opens, the
+ * first later `---` or `...` line closes, the payload between them holds a blank
+ * line, and at least one payload line is YAML-ish (condition 4). That is the shape
+ * of real YAML with a blank line in it, which a frontmatter reader still parses,
+ * and a marker stamped on lines 1 to n breaks it there. So `stamp` inserts no
+ * marker on lines 1 to n and mints no stay for a block that starts on them.
+ *
+ * Nothing reads this answer back: recognition, segmentation and every reader are
+ * unchanged, and only `stamp` consults it. Prose that looks like a key
+ * (`Note: this.`) between two thematic breaks with blank lines around it is refused
+ * too, which costs a stay and breaks nothing. Internal: not part of the package's
+ * public API; `stamp` reports the span as `refusedFrontmatter`.
+ */
+export function frontmatterWriteRefusal(text) {
+  const lines = text.split("\n");
+  if (!lines.length || !FRONTMATTER_OPEN.test(lines[0])) return null;
+  for (let i = 1; i < lines.length; i++) {
+    if (!FRONTMATTER_CLOSE.test(lines[i])) continue;
+    const payload = lines.slice(1, i);
+    if (!payload.some((ln) => isAsciiBlankLine(ln))) return null;
+    if (!payload.some((ln) => YAMLISH_LINE.test(ln))) return null;
+    return i + 1;
+  }
+  return null;
 }
 
 /**

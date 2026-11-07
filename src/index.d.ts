@@ -1,4 +1,4 @@
-// Type declarations for the markstay JS reference implementation (SPEC.md v1.10,
+// Type declarations for the markstay JS reference implementation (SPEC.md v1.11,
 // parser-free core). Hand-written to match the runtime shapes the modules in this
 // directory actually produce; keep in sync with index.js on any surface change.
 
@@ -243,6 +243,15 @@ export interface StampResult {
   text: string;
   /** Ids minted this run, with the 1-based line each marker was inserted after. */
   minted: Array<{ id: string; line: number }>;
+  /**
+   * The leading frontmatter-shaped span this run declined to write into
+   * (SPEC.md §5.3): line 1 opens with `---`, the first later `---` or `...`
+   * closes on line `end`, and recognition rejected the span only because its
+   * YAML payload holds a blank line. Set only when the span withheld a stay that
+   * would otherwise have been minted; `null` otherwise. The rest of the document
+   * is stamped as usual.
+   */
+  refusedFrontmatter: { start: 1; end: number } | null;
 }
 export function stamp(md: string, opts?: StampOptions): StampResult;
 
@@ -327,6 +336,11 @@ export function quoteRatio(a: string, b: string): number;
 export function bodyScore(sel: Selector, candidate: string): number;
 export function contextBonus(sel: Selector, prevText: string, nextText: string): number;
 export function bestMatch(sel: Selector, candidates: string[]): BestMatchResult;
+/**
+ * Every candidate ranked best first as `[score, index]`, scores unclamped, each
+ * candidate's context bonus read from its physical neighbours.
+ */
+export function rankMatches(sel: Selector, candidates: string[]): Array<[number, number]>;
 
 // --- resolver (resolve.js, SPEC.md §9.1 ladder) ---
 
@@ -334,6 +348,13 @@ export function bestMatch(sel: Selector, candidates: string[]): BestMatchResult;
 export const DEFAULT_THRESHOLD: number;
 /** Default QUOTE-tier winner-over-runner-up margin (SPEC.md §9). */
 export const DEFAULT_MARGIN: number;
+/** More QUOTE-tier contenders for one block than this fail the merge exemption (§9.1). */
+export const MERGE_CONTENDER_CAP: number;
+/**
+ * §9.1's merge exemption: whether every quote has its own occurrence in `body`,
+ * no two overlapping, after §9's quote normalization.
+ */
+export function disjointIn(quotes: string[], body: string): boolean;
 
 export interface ResolveOptions {
   mode?: ParseMode;

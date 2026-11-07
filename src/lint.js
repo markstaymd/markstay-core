@@ -6,6 +6,15 @@ import { bodyHash } from "./hash.js";
 import { isBlockStayMarker } from "./markers.js";
 import { parseDocument } from "./parse.js";
 import { adoptedIds } from "./adoption.js";
+import { bodyScoreNormalized, normalize } from "./quote.js";
+
+// SPEC.md §11 (v1.11): a kept id has moved off its block when its current block
+// scores under RELOCATED_BELOW against its old text and exactly one block in the
+// run of free blocks directly above it scores RELOCATED_AT or more against that
+// text. A block is free when it carries no block stay id present in both
+// documents.
+export const RELOCATED_BELOW = 0.5;
+export const RELOCATED_AT = 0.8;
 
 const LEVELS = { error: 0, warn: 1, info: 2 };
 
@@ -121,8 +130,9 @@ export function stayMarkerIds(blocks) {
 
 /**
  * Regeneration diff (SPEC.md §11): what an edit did to the ids. Catches the
- * AI-rewrite failure mode (dropped markers) plus duplication and exact-content
- * relocation. Returns findings in detection order.
+ * AI-rewrite failure mode (dropped markers) plus duplication and relocation:
+ * an exact swap, or an id moved off its block (v1.11). Returns findings in
+ * detection order.
  */
 export function lintDiff(beforeMd, afterMd, mode = "blank-line") {
   const beforeBlocks = parseDocument(beforeMd, mode);
@@ -198,6 +208,8 @@ export function lintDiffBlocks(beforeBlocks, afterBlocks, opts = {}) {
     }
   }
 
+  let window = null; // built on the first drifted id that needs it
+
   for (const [mid, blks] of after) {
     if (!before.has(mid) || blks.length !== 1) continue;
     const a = blks[0];
@@ -210,6 +222,12 @@ export function lintDiffBlocks(beforeBlocks, afterBlocks, opts = {}) {
         finding("error", "RELOCATED_ID",
           `id ${mid} now sits on content that previously carried id ${movedFrom} ` +
             `(markers look swapped or relocated)`, mid)
+      );
+    } else if (movedOff(b0.content, a, () => (window ??= relocationWindow(beforeIdx, beforeBlocks, afterBlocks)))) {
+      findings.push(
+        finding("error", "RELOCATED_ID",
+          `id ${mid} now sits on different content, and its old text survives on another ` +
+            `block that carries no kept id (a block inserted above its marker?)`, mid)
       );
     } else {
       findings.push(
@@ -238,6 +256,74 @@ export function lintDiffBlocks(beforeBlocks, afterBlocks, opts = {}) {
     }
   }
   return findings;
+}
+
+/**
+ * The after-edit content blocks, each marked free or owned. A block carrying a
+ * kept id is that id's, so it is never another id's surviving text, and it ends
+ * the window above any block below it. Every block stay id on an after-edit
+ * content block is in the after index, so "present in both" reduces to "present
+ * in the baseline". Bodies are hashed and normalized on first use.
+ */
+function relocationWindow(beforeIdx, beforeBlocks, afterBlocks) {
+  const blocks = afterBlocks.filter((b) => b.index >= 0);
+  const at = new Map(blocks.map((b, i) => [b, i]));
+  const owned = blocks.map((b) =>
+    b.markers.some((mk) => mk.id && isBlockStayMarker(mk) && beforeIdx.has(mk.id))
+  );
+  // How many baseline content blocks have each body hash.
+  const beforeHashes = new Map();
+  for (const b of beforeBlocks) {
+    if (b.index < 0 || !b.content) continue;
+    const h = bodyHash(b.content);
+    beforeHashes.set(h, (beforeHashes.get(h) ?? 0) + 1);
+  }
+  const hashes = new Map();
+  const norms = new Map();
+  /**
+   * Normalized bodies of the free blocks directly above `block`, nearest first,
+   * leaving out any block unchanged from a baseline block other than the one
+   * `old` names: that block was there before the edit, so the edit did not
+   * strand it.
+   */
+  function* candidates(block, old) {
+    const own = bodyHash(old);
+    for (let i = at.get(block) - 1; i >= 0 && !owned[i]; i--) {
+      if (!blocks[i].content) continue;
+      if (!hashes.has(i)) hashes.set(i, bodyHash(blocks[i].content));
+      const h = hashes.get(i);
+      if ((beforeHashes.get(h) ?? 0) - (h === own ? 1 : 0) > 0) continue;
+      if (!norms.has(i)) norms.set(i, normalize(blocks[i].content));
+      yield norms.get(i);
+    }
+  }
+  return { candidates };
+}
+
+/**
+ * SPEC.md §11's relocation test for a kept id whose block changed: (1) its
+ * current block scores under RELOCATED_BELOW against the old text, by §9's body
+ * score without context; (2) exactly one candidate in the run of free blocks
+ * directly above the current block scores RELOCATED_AT or more against the old
+ * text, where a block unchanged from another baseline block is not a candidate;
+ * (3) the current block's normalized text is not inside the old text, so typing a
+ * blank line into a paragraph (the marker stays on a short tail) is drift, not
+ * relocation. The window is the shape the rule names, a block inserted between
+ * another block and its trailing marker. Each free block sits in the run above
+ * at most one block, so the scan costs at most the free blocks times the most
+ * kept ids any one block carries: linear while ids sit one to a block, and
+ * quadratic when an edit piles every marker onto one block. `getWindow` builds
+ * it on first use.
+ */
+function movedOff(old, block, getWindow) {
+  const q = normalize(old);
+  const c = normalize(block.content);
+  if (bodyScoreNormalized(q, c) >= RELOCATED_BELOW || q.includes(c)) return false;
+  let hits = 0;
+  for (const f of getWindow().candidates(block, old)) {
+    if (bodyScoreNormalized(q, f) >= RELOCATED_AT && ++hits > 1) return false;
+  }
+  return hits === 1;
 }
 
 /** Canonical finding order: (level rank, line, code). Stable. */

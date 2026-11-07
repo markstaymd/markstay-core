@@ -18,7 +18,7 @@ import {
   rewriteMarkers,
 } from "./markers.js";
 import { codeLines, fenceState, stripMarkersOutsideCode } from "./code.js";
-import { blankFrontmatter, segmentBlankLine } from "./segment.js";
+import { blankFrontmatter, frontmatterWriteRefusal, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
 import { mintId, ID_CHARSET } from "./id.js";
 
@@ -120,7 +120,11 @@ function uniqueMinter(used, newId) {
  *   newId       () => string, the id factory (default mintId over the opts below)
  *   length/alphabet/random  forwarded to mintId when `newId` is not given
  *
- * Returns { text, minted: [{ id, line }] }. Line endings are normalized to LF.
+ * Returns { text, minted: [{ id, line }], refusedFrontmatter }. Line endings are
+ * normalized to LF. `refusedFrontmatter` is `{ start: 1, end: n }` when a leading
+ * frontmatter-shaped span withheld a stay that would otherwise have been minted
+ * (SPEC.md §5.3, see `frontmatterWriteRefusal`), and `null` otherwise. The rest
+ * of the document is stamped as usual.
  */
 export function stamp(md, opts = {}) {
   const {
@@ -139,6 +143,9 @@ export function stamp(md, opts = {}) {
 
   const norm = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = norm.split("\n");
+  // SPEC.md §5.3 (v1.11): lines 1 to `frontmatterEnd` are YAML to a frontmatter
+  // reader even though recognition rejected them, so nothing is inserted there.
+  const frontmatterEnd = frontmatterWriteRefusal(norm);
 
   // SPEC.md §3.3, computed on the blanked text so it agrees line-for-line with
   // what parseDocument sees. `openAfter` is the writer's half of the rule: a
@@ -175,6 +182,7 @@ export function stamp(md, opts = {}) {
     if (content !== "") {
       const nLines = chunk.split("\n").length;
       current = {
+        startLine,
         lastLine0: startLine + nLines - 2,
         content,
         hasId,
@@ -200,22 +208,31 @@ export function stamp(md, opts = {}) {
 
   const insertAfter = new Map(); // 0-based line -> marker text
   const minted = [];
+  let frontmatterWithheld = false;
   for (const blk of needsStamp) {
     if (blk.hasId || blk.inFence) continue;
+    if (frontmatterEnd !== null && blk.startLine <= frontmatterEnd) {
+      // SPEC.md §5.3: a block that starts in the span gets no minted stay, even a
+      // chunk that runs on past the closer into the body: a marker after it would
+      // bind to a block whose body is half YAML.
+      frontmatterWithheld = true;
+      continue;
+    }
     const id = nextId();
     const hex = hash ? bodyHash(blk.content, hashLength) : null;
     insertAfter.set(blk.lastLine0, formatMarker({ id, hash: hex, syntax }));
     minted.push({ id, line: blk.lastLine0 + 1 });
   }
 
-  if (insertAfter.size === 0) return { text: norm, minted: [] };
+  const refusedFrontmatter = frontmatterWithheld ? { start: 1, end: frontmatterEnd } : null;
+  if (insertAfter.size === 0) return { text: norm, minted: [], refusedFrontmatter };
 
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     out.push(lines[i]);
     if (insertAfter.has(i)) out.push(insertAfter.get(i));
   }
-  return { text: out.join("\n"), minted };
+  return { text: out.join("\n"), minted, refusedFrontmatter };
 }
 
 /**

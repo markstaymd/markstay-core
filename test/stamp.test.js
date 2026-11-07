@@ -357,3 +357,41 @@ test("repairDuplicates: a re-minted id never collides with an existing id", () =
   const { renamed } = repairDuplicates(md, { newId: () => proposals[i++] });
   assert.deepEqual(renamed, [{ from: "dup", to: "ok1" }]);
 });
+
+// SPEC.md §5.3 (v1.11): the frontmatter-shaped span. The text and minted halves
+// are pinned by spec/stamp.json; these pin the reporting field this core's stamp
+// gained with its first refusal.
+const BLANK_PAYLOAD_SPAN = "---\nname: demo\n\ndescription: two\n---\n\nBody text.\n";
+
+test("stamp reports a frontmatter-shaped span and stamps what follows it", () => {
+  const r = stamp(BLANK_PAYLOAD_SPAN, { newId: counter("n") });
+  assert.deepEqual(r.refusedFrontmatter, { start: 1, end: 5 });
+  assert.equal(r.minted.length, 1);
+  assert.equal(r.minted[0].line, 7);
+  assert.deepEqual(r.text.split("\n").slice(0, 5), BLANK_PAYLOAD_SPAN.split("\n").slice(0, 5));
+  // A chunk that runs on past the closer starts in the span: refused whole, and
+  // the result still names the span although nothing was minted.
+  const joined = "---\nname: demo\n\ndescription: two\n---\nBody right after.\n";
+  const j = stamp(joined, { newId: counter("n") });
+  assert.deepEqual(j, { text: joined, minted: [], refusedFrontmatter: { start: 1, end: 5 } });
+});
+
+test("refusedFrontmatter is null when the span withholds nothing", () => {
+  assert.equal(stamp("Body.\n", { newId: counter("n") }).refusedFrontmatter, null);
+  assert.equal(stamp("---\nname: demo\n---\n\nBody.\n", { newId: counter("n") }).refusedFrontmatter, null);
+  const marked = "---\nname: demo\n<!-- stay:aa -->\n\ndescription: two\n---\n<!-- stay:bb -->\n\nBody.\n";
+  const r = stamp(marked, { newId: counter("n") });
+  assert.equal(r.refusedFrontmatter, null);
+  assert.equal(r.minted.length, 1);
+});
+
+test("the refusal leaves parse and restamp alone", () => {
+  assert.deepEqual(
+    parseDocument(BLANK_PAYLOAD_SPAN).filter((b) => b.index >= 0).map((b) => b.line),
+    [1, 4, 7],
+  );
+  const doc = "---\nname: demo\n<!-- stay:aa hash=sha256:0000 -->\n\nb: c\n---\n";
+  const r = restamp(doc);
+  assert.deepEqual(r.refreshed, ["aa"]);
+  assert.ok(!r.text.includes("hash=sha256:0000"));
+});

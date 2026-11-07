@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.10-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.11-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.10), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.11), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -223,36 +223,37 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The shared corpus contributes 469 cross-language assertions; CLI and unit tests
+The shared corpus contributes 531 cross-language assertions; CLI and unit tests
 cover the Git adapter, rendering, and write-path invariants around it.
 
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **469 core vectors** across two tiers, plus an optional `rows` profile
-(SPEC.md §5.6 table-row identity and §3.4 carrier refusals, 32 vectors) that this
-reference **declines**:
+reference. **531 core vectors** across two tiers, plus two optional profiles that this
+reference **declines**: `rows` (SPEC.md §5.6 table-row identity and §3.4 carrier
+refusals, 32 vectors) and `items` (SPEC.md §5.5 list-item recovery, §9.2 tier 0, and
+the §5.3 write refusal per item, 9 vectors).
 §16 keeps child segmentation optional and this implementation does not segment
 child blocks. Declining is a declared, asserted state rather than a silent skip,
-so the runner fails if the profile disappears from the corpus, if its vector count
+so the runner fails if a profile disappears from the corpus, if its vector count
 changes, or if a profile it has never heard of turns up.
 
 | category | spec | gen | covers |
 |----------|-----:|----:|--------|
 | hash     | 10   | 14  | §8 ASCII normalization + SHA-256 + truncation (incl. NBSP kept) |
-| markers  | 16   | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex |
+| markers  | 24   | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex, overlapping candidates |
 | parse    | 50   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion, the thematic-break spans it must not eat, and §3.3's fenced-code mask |
 | lint     | 12   | 8   | §7/§8/§10 findings (ordered) |
-| diff     | 50   | 6   | §11 regeneration diff (ordered) |
+| diff     | 70   | 6   | §11 regeneration diff (ordered), incl. the relocated id |
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
 | score    | 12   | 19  | §9 wrappers: body score, context bonus, best match, ASCII fold |
-| resolve  | 26   | 9   | §9.1 ladder + margin guard |
+| resolve  | 48   | 9   | §9.1 ladder + margin guard, one block per id |
 | anchors  | 4    | 0   | §9 selector storage, which resolution cannot see |
 | mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
-| stamp    | 9    | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule |
+| stamp    | 21   | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule and §5.3's write refusal |
 | preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
 | check    | 20   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
-| **total**| **229** | **240** | |
+| **total**| **291** | **240** | |
 
 The `preserve` row is the odd one and deliberately so: it holds plain prose rather
 than a computation. Each implementation carries its own copy of the §11 instruction
@@ -310,6 +311,14 @@ change to either implementation that breaks agreement fails one of them.
   and the content below it, blank-line segmentation reads one run and binds the
   marker to that content, so it is live rather than orphaned and deleting it drops
   a working id.
+- **A frontmatter-shaped span is not written into (§5.3, v1.11):** a leading `---`
+  span that recognition rejects only because its payload holds a blank line is content
+  to every reader here, and still YAML to a static site generator or a skill loader, so
+  a marker stamped into it breaks that file. `stamp` inserts no marker on lines 1 to
+  *n* (the first later `---` or `...`) and mints no stay for a block that starts on
+  them. The result's `refusedFrontmatter` is `{ start: 1, end: n }` when the span
+  withheld a stay, and `null` otherwise. Recognition does not change, and `restamp`
+  still refreshes a marker already inside the span.
 - **Text inside a fenced code block is content, not markup (§3.3):** a
   marker-shaped string there identifies no block, stays in the hashed body, and
   never makes its block stamped; a writer will not put one there either. That is

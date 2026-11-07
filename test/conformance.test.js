@@ -244,12 +244,12 @@ const VERIFIERS = {
 // pass as silence.
 //
 // §16 keeps §5.5 and §5.6 child segmentation OPTIONAL, and only the Python
-// reference implements it, so declining `rows` is conforming. Running 466 of
-// the 469 core vectors would not be, which is why the core count is asserted
-// below rather than left to whatever happens to be on disk.
-const KNOWN_PROFILES = new Set(["rows"]);
+// reference implements it, so declining `items` and `rows` is conforming.
+// Running 498 of the 531 core vectors would not be, which is why the core count
+// is asserted below rather than left to whatever happens to be on disk.
+const KNOWN_PROFILES = new Set(["rows", "items"]);
 const ADVERTISED_PROFILES = new Set();
-const CORE_VECTORS = 469;
+const CORE_VECTORS = 531;
 
 function corpusFiles() {
   const files = [];
@@ -302,7 +302,7 @@ test("every core vector runs here, and every declined one is accounted for", () 
   const declined = declinedFiles.map(
     ({ data }) => `${data.profile}:${data.vectors.length}`,
   );
-  assert.deepEqual(declined, ["rows:32"], "declined optional profiles");
+  assert.deepEqual(declined, ["items:9", "rows:32"], "declined optional profiles");
 });
 
 // A verifier with no vectors is a check that silently is not running, and the

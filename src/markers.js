@@ -31,23 +31,40 @@ function normalizedView(text) {
   return { normalized, rawBoundaries };
 }
 
-function nextOpener(text, from) {
-  const html = text.indexOf(HTML_OPEN, from);
-  const mdx = text.indexOf(MDX_OPEN, from);
+/**
+ * `indexOf(needle, from)` over one text, reusing the last answer while it still
+ * holds. Every marker searches forward for each opener and closer, and a needle
+ * that is far away or absent would otherwise be rescanned to the end per marker.
+ */
+function forwardFinder(text, needle) {
+  let from = Infinity;
+  let at = -1;
+  return (query) => {
+    if (query < from || (at >= 0 && query > at)) {
+      from = query;
+      at = text.indexOf(needle, query);
+    }
+    return at;
+  };
+}
+
+function nextOpener(find, from) {
+  const html = find.html(from);
+  const mdx = find.mdx(from);
   if (html < 0) return mdx < 0 ? null : { start: mdx, syntax: "mdx", open: MDX_OPEN };
   if (mdx < 0 || html <= mdx) return { start: html, syntax: "html", open: HTML_OPEN };
   return { start: mdx, syntax: "mdx", open: MDX_OPEN };
 }
 
 /** The first host-owned close, whether or not it completes a marker form. */
-function hostClose(text, syntax, from) {
+function hostClose(text, find, syntax, from) {
   if (syntax === "mdx") {
-    const start = text.indexOf("*/", from);
+    const start = find.mdxClose(from);
     if (start < 0) return null;
     return { start, end: start + (text[start + 2] === "}" ? 3 : 2), valid: text[start + 2] === "}" };
   }
-  const ordinary = text.indexOf("-->", from);
-  const parseError = text.indexOf("--!>", from);
+  const ordinary = find.htmlClose(from);
+  const parseError = find.htmlParseErrorClose(from);
   if (ordinary < 0 && parseError < 0) return null;
   if (parseError >= 0 && (ordinary < 0 || parseError < ordinary)) {
     return { start: parseError, end: parseError + 4, valid: false };
@@ -118,23 +135,96 @@ function parseBody(body) {
   return { id, idEnd, attributes };
 }
 
+/**
+ * Reject overlapping invalid bodies without reparsing their shared suffixes.
+ * A state describes the grammar immediately before a character. Memoizing each
+ * (position, state) bounds validation to nine visits per character for a host
+ * closer. Each syntax advances through disjoint closer intervals independently.
+ * Accepted bodies still use parseBody for their values and exact source spans.
+ */
+function bodyValidator(text) {
+  const START = 0, ID = 1, SEP = 2, KEY = 3, VALUE = 4;
+  const BARE = 5, QUOTED = 6, ESCAPE = 7, AFTER_QUOTE = 8;
+  let end = -1;
+  const memo = new Map();
+  return (start, close) => {
+    if (close !== end) {
+      memo.clear();
+      end = close;
+    }
+    let pos = start;
+    let state = START;
+    const path = [];
+    let valid;
+    while (true) {
+      const key = pos * 9 + state;
+      if (memo.has(key)) {
+        valid = memo.get(key);
+        break;
+      }
+      path.push(key);
+      if (pos === end) {
+        valid = state === ID || state === SEP || state === BARE || state === AFTER_QUOTE;
+        break;
+      }
+      const c = text[pos];
+      const cp = text.charCodeAt(pos);
+      const printable = cp >= 0x21 && cp <= 0x7e && c !== '"';
+      let next = -1;
+      switch (state) {
+        case START: if (isIdChar(c)) next = ID; break;
+        case ID: if (isIdChar(c)) next = ID; else if (isSpaceTab(c)) next = SEP; break;
+        case SEP: if (isSpaceTab(c)) next = SEP; else if (isAlpha(c)) next = KEY; break;
+        case KEY: if (isIdChar(c)) next = KEY; else if (c === "=") next = VALUE; break;
+        case VALUE: if (c === '"') next = QUOTED; else if (printable) next = BARE; break;
+        case BARE: if (isSpaceTab(c)) next = SEP; else if (printable) next = BARE; break;
+        case QUOTED:
+          if (c === '"') next = AFTER_QUOTE;
+          else if (c === "\\") next = ESCAPE;
+          else if (c === "\n" || (cp >= 0x20 && cp <= 0x7e)) next = QUOTED;
+          break;
+        case ESCAPE: if (c === "\\" || c === '"') next = QUOTED; break;
+        case AFTER_QUOTE: if (isSpaceTab(c)) next = SEP; break;
+      }
+      if (next < 0) {
+        valid = false;
+        break;
+      }
+      pos += 1;
+      state = next;
+    }
+    for (const key of path) memo.set(key, valid);
+    return valid;
+  };
+}
+
 /** The one invalid shape for which §4 still requires a lint diagnostic. */
-function malformedKeyFirst(body) {
-  if (!body.startsWith("stay:")) return false;
-  let pos = 5;
-  if (!isAlpha(body[pos])) return false;
+function malformedKeyFirst(text, start, end) {
+  let pos = start + 5;
+  if (pos >= end || !isAlpha(text[pos])) return false;
   pos += 1;
-  while (isIdChar(body[pos])) pos += 1;
-  return body[pos] === "=";
+  while (pos < end && isIdChar(text[pos])) pos += 1;
+  return pos < end && text[pos] === "=";
 }
 
 /** Internal accepted/diagnostic records with exact source spans. */
 export function scanMarkerRecords(text, lineOffset = 0) {
   const { normalized, rawBoundaries } = normalizedView(text);
   const records = [];
+  // Openers arrive in source order, so the line count advances with them.
+  let newlines = 0;
+  let countedTo = 0;
+  const find = {
+    html: forwardFinder(normalized, HTML_OPEN),
+    mdx: forwardFinder(normalized, MDX_OPEN),
+    htmlClose: forwardFinder(normalized, "-->"),
+    htmlParseErrorClose: forwardFinder(normalized, "--!>"),
+    mdxClose: forwardFinder(normalized, "*/"),
+  };
+  const validateBody = { html: bodyValidator(normalized), mdx: bodyValidator(normalized) };
   let cursor = 0;
   while (cursor < normalized.length) {
-    const opener = nextOpener(normalized, cursor);
+    const opener = nextOpener(find, cursor);
     if (opener === null) break;
     let bodyStart = opener.start + opener.open.length;
     while (isSpaceTab(normalized[bodyStart])) bodyStart += 1;
@@ -143,14 +233,19 @@ export function scanMarkerRecords(text, lineOffset = 0) {
       continue;
     }
 
-    const close = hostClose(normalized, opener.syntax, bodyStart + 5);
+    const close = hostClose(normalized, find, opener.syntax, bodyStart + 5);
     if (close === null) {
       cursor = opener.start + 1;
       continue;
     }
+    const valid = close.valid && validateBody[opener.syntax](bodyStart + 5, close.start);
+    const malformed = !valid && malformedKeyFirst(normalized, bodyStart, close.start);
+    if (!valid && !malformed) {
+      cursor = opener.start + 1;
+      continue;
+    }
     const body = normalized.slice(bodyStart, close.start);
-    const parsed = close.valid ? parseBody(body) : null;
-    const malformed = parsed === null && malformedKeyFirst(body);
+    const parsed = valid ? parseBody(body) : null;
     if (parsed === null && !malformed) {
       cursor = opener.start + 1;
       continue;
@@ -168,6 +263,9 @@ export function scanMarkerRecords(text, lineOffset = 0) {
       }
       if (attr.key === "subhash" && digest && subhash === null) subhash = digest[1].toLowerCase();
     }
+    for (; countedTo < opener.start; countedTo++) {
+      if (normalized.charCodeAt(countedTo) === 10) newlines += 1;
+    }
     const start = rawBoundaries[opener.start];
     const end = rawBoundaries[close.end];
     const rawBodyStart = rawBoundaries[bodyStart];
@@ -178,7 +276,7 @@ export function scanMarkerRecords(text, lineOffset = 0) {
       hasSubhash: attributes.some((attr) => attr.key === "subhash"),
       raw: text.slice(start, end),
       syntax: opener.syntax,
-      line: lineOffset + normalized.slice(0, opener.start).split("\n").length,
+      line: lineOffset + (newlines + 1),
       malformed,
     };
     const staySpan = parsed

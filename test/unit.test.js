@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   bodyHash, parseDocument, lintDocument, lintDiff, hasErrors,
   bestMatch, buildAnchors, checkEntries, resolve,
+  rankMatches, disjointIn, MERGE_CONTENDER_CAP,
 } from "../src/index.js";
 
 const codes = (findings) => findings.map((f) => f.code).sort();
@@ -259,6 +260,78 @@ test("quote matcher: no good match scores below threshold", () => {
   const cands = ["the quick brown fox jumps", "a totally different sentence here"];
   const { score } = bestMatch({ quote: "completely unrelated text xyz" }, cands);
   assert.ok(score < 0.5);
+});
+
+test("rankMatches: its first two entries are what bestMatch reports", () => {
+  const cands = ["alpha beta gamma", "alpha beta delta", "unrelated words"];
+  const sel = { quote: "alpha beta gamma", prefix: "", suffix: "unrelated" };
+  const ranked = rankMatches(sel, cands);
+  const bm = bestMatch(sel, cands);
+  assert.equal(ranked.length, 3);
+  assert.equal(ranked[0][1], bm.index);
+  assert.equal(Math.min(ranked[0][0], 1), bm.score);
+  assert.equal(Math.min(ranked[1][0], 1), bm.runnerUp);
+  assert.deepEqual(rankMatches(sel, []), []);
+});
+
+// --- §9.1 merge exemption (v1.11). The corpus carries the placements; these
+// are the edges a vector cannot reach, because §9 scores an empty quote 0. ---
+
+test("merge exemption: no contenders holds, an empty quote fails", () => {
+  assert.equal(disjointIn([], "anything"), true);
+  assert.equal(disjointIn([""], "anything"), false);
+  assert.equal(disjointIn(["any", "  \n "], "anything"), false); // empty once normalized
+});
+
+test("merge exemption: the cap comes first, at 16", () => {
+  assert.equal(MERGE_CONTENDER_CAP, 16);
+  assert.equal(disjointIn(Array(16).fill("a"), "a".repeat(16)), true);
+  assert.equal(disjointIn(Array(17).fill("a"), "a".repeat(40)), false);
+});
+
+test("merge exemption: placement is disjoint, half-open and per contender", () => {
+  assert.equal(disjointIn(["abcd", "bcde"], "abcdef abcd"), true); // greedy trap
+  assert.equal(disjointIn(["abc", "def"], "abcdef"), true); // spans touch
+  assert.equal(disjointIn(["abcd", "cdef"], "abcdef xx"), false); // overlap only
+  assert.equal(disjointIn(["same", "same"], "same"), false); // one copy, two quotes
+  assert.equal(disjointIn(["same", "same"], "same same"), true);
+});
+
+test("merge exemption: §9 normalization and code points", () => {
+  assert.equal(disjointIn(["Alpha  Beta", "GAMMA"], "alpha beta\ngamma"), true);
+  // Quotes of 15 code points in all against a 16-code-point block (19 UTF-16 units
+  // in all against 20).
+  assert.equal(disjointIn(["\u{1F600}\u{1F600} alpha", "\u{1F600}\u{1F600} beta"],
+    "\u{1F600}\u{1F600} alpha \u{1F600}\u{1F600} beta"), true);
+});
+
+test("merge exemption: a lone surrogate never matches half of a pair", () => {
+  // In code points the body is "aaa", U+1F600, "bbb"; "aaa\uD83D" is not in it.
+  assert.equal(disjointIn(["aaa\uD83D", "bbb"], "aaa\u{1F600}bbb"), false);
+  assert.equal(disjointIn(["\uDE00bbb", "aaa"], "aaa\u{1F600}bbb"), false);
+  // A lone surrogate in the body is a code point of its own and matches itself.
+  assert.equal(disjointIn(["aaa\uD83D", "bbb"], "aaa\uD83D bbb"), true);
+  // The search moves past a split match to a whole one later in the body. The
+  // lone surrogate must sit before "x", so only the retry can place both.
+  assert.equal(disjointIn(["\uD83D", "x"], "\u{1F600}\uD83Dx"), true);
+});
+
+test("resolve: ids naming Object.prototype members resolve like any other", () => {
+  const before = "Alpha block text.\n<!-- stay:constructor -->\n\nBravo block text.\n<!-- stay:__proto__ -->\n";
+  const res = resolve(buildAnchors(before), "Alpha block text.\n\nBravo block text.\n");
+  assert.deepEqual(Object.keys(res), ["constructor", "__proto__"]);
+  assert.equal(Object.getPrototypeOf(res), Object.prototype);
+  assert.deepEqual([res.constructor.method, res.constructor.target], ["hash", 0]);
+  assert.deepEqual([res["__proto__"].method, res["__proto__"].target], ["hash", 1]);
+});
+
+test("resolve: a repeated anchor id resolves the last anchor read", () => {
+  const anchors = buildAnchors("First block text.\n<!-- stay:x -->\n\nSecond block text.\n<!-- stay:x -->\n");
+  assert.equal(anchors.length, 2);
+  const res = resolve(anchors, "First block text.\n\nSecond block text.\n");
+  assert.deepEqual(Object.keys(res), ["x"]);
+  assert.equal(res.x.method, "hash");
+  assert.equal(res.x.target, 1);
 });
 
 // --- leading YAML frontmatter is metadata, not a block (SPEC.md §5) -------

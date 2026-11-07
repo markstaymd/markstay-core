@@ -8,7 +8,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -187,4 +187,19 @@ test("preserve rejects input that is not valid UTF-8", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("stamp names a refused frontmatter-shaped span on stderr and exits 0", () => {
+  withTmp(["---\nname: demo\n\ndescription: two\n---\n\nBody text.\n", "Body.\n"], (shaped, plain) => {
+    const r = spawnSync(process.execPath, [CLI, "stamp", shaped], { encoding: "utf8" });
+    assert.equal(r.status, 0);
+    assert.ok(r.stderr.includes(`${shaped}: 1 id(s) minted\n`), r.stderr);
+    assert.ok(
+      r.stderr.includes(`${shaped}: frontmatter-shaped span L1-L5 refused under §5.3, left unstamped\n`),
+      r.stderr,
+    );
+    const p = spawnSync(process.execPath, [CLI, "stamp", plain], { encoding: "utf8" });
+    assert.equal(p.status, 0);
+    assert.ok(!p.stderr.includes("frontmatter-shaped"), p.stderr);
+  });
 });

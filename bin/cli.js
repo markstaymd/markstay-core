@@ -381,12 +381,16 @@ function runWrite(verb, rest, op) {
   }
   for (const f of files) {
     const { text, note } = op(readFileSync(f, "utf8"), flags);
+    // A note may hold several lines; each is reported against its file.
+    const report = () => {
+      for (const line of note.split("\n")) process.stderr.write(`${f}: ${line}\n`);
+    };
     if (flags.write) {
       writeFileSync(f, text);
-      process.stderr.write(`${f}: ${note}\n`);
+      report();
     } else {
       process.stdout.write(text);
-      if (note) process.stderr.write(`${f}: ${note}\n`);
+      if (note) report();
     }
   }
   return 0;
@@ -394,12 +398,19 @@ function runWrite(verb, rest, op) {
 
 function cmdStamp(rest) {
   return runWrite("stamp", rest, (md, flags) => {
-    const { text, minted } = stamp(md, {
+    const { text, minted, refusedFrontmatter } = stamp(md, {
       syntax: flags.mdx ? "mdx" : "html",
       hash: !flags.noHash,
       ...(flags.hashLength !== undefined ? { hashLength: flags.hashLength } : {}),
     });
-    return { text, note: `${minted.length} id(s) minted` };
+    let note = `${minted.length} id(s) minted`;
+    if (refusedFrontmatter) {
+      // SPEC.md §5.3: the rest of the document is stamped and the exit status
+      // stays 0; this line is what makes the declined span visible and countable.
+      const { start, end } = refusedFrontmatter;
+      note += `\nfrontmatter-shaped span L${start}-L${end} refused under §5.3, left unstamped`;
+    }
+    return { text, note };
   });
 }
 

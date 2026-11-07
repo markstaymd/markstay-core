@@ -64,8 +64,11 @@ export function quoteRatio(a, b) {
  * `sel` is { quote, prefix?, suffix? }.
  */
 export function bodyScore(sel, candidate) {
-  const q = normalize(sel.quote);
-  const c = normalize(candidate);
+  return bodyScoreNormalized(normalize(sel.quote), normalize(candidate));
+}
+
+/** `bodyScore` over two bodies already passed through `normalize`. */
+export function bodyScoreNormalized(q, c) {
   if (!q || !c) return 0.0;
   if (q === c) return 1.0;
   let base = quoteRatio(q, c);
@@ -92,11 +95,15 @@ export function contextBonus(sel, prevText, nextText) {
 }
 
 /**
- * Rank candidate block bodies against a selector. Returns
- * { index, score, runnerUp }. On an exact score tie the later candidate wins
- * (Python sorts (score, index) descending), and the score ceiling is 1.0.
+ * Every candidate block body ranked against a selector, best first, as
+ * `[score, index]` pairs. A candidate's context bonus reads its physical
+ * neighbours in `candidates`, so a caller that ranks a subset (§9.1's carriers,
+ * or the unclaimed blocks) filters this list rather than re-ranking a shorter
+ * one. Scores are not clamped here: the ceiling of 1.0 applies to what a caller
+ * reports and compares, as in `bestMatch`. On an exact score tie the later
+ * candidate ranks first (Python sorts (score, index) descending).
  */
-export function bestMatch(sel, candidates) {
+export function rankMatches(sel, candidates) {
   const scored = [];
   for (let i = 0; i < candidates.length; i++) {
     const s = bodyScore(sel, candidates[i]);
@@ -104,8 +111,18 @@ export function bestMatch(sel, candidates) {
     const nextText = i + 1 < candidates.length ? candidates[i + 1] : "";
     scored.push([s + contextBonus(sel, prevText, nextText), i]);
   }
-  if (!scored.length) return { index: -1, score: 0.0, runnerUp: 0.0 };
   scored.sort((x, y) => (y[0] - x[0]) || (y[1] - x[1]));
+  return scored;
+}
+
+/**
+ * Rank candidate block bodies against a selector. Returns
+ * { index, score, runnerUp }. On an exact score tie the later candidate wins
+ * (Python sorts (score, index) descending), and the score ceiling is 1.0.
+ */
+export function bestMatch(sel, candidates) {
+  const scored = rankMatches(sel, candidates);
+  if (!scored.length) return { index: -1, score: 0.0, runnerUp: 0.0 };
   const [bestScore, bestIndex] = scored[0];
   const runnerUp = scored.length > 1 ? scored[1][0] : 0.0;
   return { index: bestIndex, score: Math.min(bestScore, 1.0), runnerUp: Math.min(runnerUp, 1.0) };
