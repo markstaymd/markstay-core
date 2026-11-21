@@ -1,4 +1,4 @@
-// Type declarations for the markstay JS reference implementation (SPEC.md v1.11,
+// Type declarations for the markstay JS reference implementation (SPEC.md v1.12,
 // parser-free core). Hand-written to match the runtime shapes the modules in this
 // directory actually produce; keep in sync with index.js on any surface change.
 
@@ -169,15 +169,17 @@ export interface RawMarker {
 /**
  * Rewrite markers in place, in document order. `transform` returns a replacement
  * string, or null/undefined to leave a marker unchanged. `code` is the SPEC.md
- * §3.3 mask: matches opening on one of those lines are left byte-for-byte alone.
+ * §3.3 / §3.5 mask from `codeLines`: matches opening on one of its fenced lines,
+ * or inside one of its closed inline code spans, are left byte-for-byte alone. A
+ * plain set of line numbers is a mask with no span half.
  */
 export function rewriteMarkers(
   text: string,
   transform: (marker: RawMarker) => string | null | undefined,
-  code?: ReadonlySet<number> | null
+  code?: ReadonlySet<number> | CodeMask | null
 ): string;
 
-// --- fenced code blocks (code.js, SPEC.md §3.3) ---
+// --- code is content (code.js, SPEC.md §3.3 fenced blocks, §3.5 inline spans) ---
 
 /** Fence geometry: lines inside a fence, and lines a fence is still open after. */
 export interface FenceState {
@@ -186,12 +188,23 @@ export interface FenceState {
 }
 
 export function fenceState(text: string): FenceState;
-/** The 1-based line numbers inside a fenced code block (SPEC.md §3.3). */
-export function codeLines(text: string): Set<number>;
-/** Strip markers, leaving marker-shaped strings inside a fence in place (§3.3). */
+/**
+ * A document's code mask. As a set it holds the 1-based line numbers inside a
+ * fenced code block (SPEC.md §3.3). `spans` maps a 1-based line number to the
+ * `[start, end)` columns of each closed inline code span's content on it (§3.5),
+ * in UTF-16 code units of the LF-normalized line. A marker opening at a fenced
+ * line or inside a span is content, not a marker.
+ */
+export interface CodeMask extends Set<number> {
+  spans: Map<number, Array<[number, number]>>;
+}
+
+/** The code mask for a document: fenced lines (§3.3) plus closed inline code spans (§3.5). */
+export function codeLines(text: string): CodeMask;
+/** Strip markers, leaving marker-shaped strings inside code in place (§3.3, §3.5). */
 export function stripMarkersOutsideCode(
   text: string,
-  code: ReadonlySet<number>,
+  code: ReadonlySet<number> | CodeMask,
   lineOffset?: number
 ): string;
 

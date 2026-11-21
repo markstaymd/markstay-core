@@ -29,6 +29,9 @@ function ids(prefix = "n") {
 
 const setOf = (...ns) => new Set(ns);
 const markerIds = (blocks) => blocks.flatMap((b) => b.markers.map((m) => m.id));
+// The fence half of the code mask as a plain Set: `codeLines` returns a CodeMask,
+// whose `spans` (§3.5) these fence cases do not test.
+const fenced = (md) => new Set(codeLines(md));
 
 // --- fence recognition (§3.3, the line rule) ------------------------------
 
@@ -61,7 +64,7 @@ const RECOGNITION = [
 
 test("codeLines recognises the fences the line rule can see", () => {
   for (const [md, expected] of RECOGNITION) {
-    assert.deepEqual(codeLines(md), expected, JSON.stringify(md));
+    assert.deepEqual(fenced(md), expected, JSON.stringify(md));
   }
 });
 
@@ -73,7 +76,7 @@ test("CRLF and LF twins give the same mask", () => {
 test("a fence carrying a blockquote marker is not covered", () => {
   // §3.3 names this as the rule's real limit rather than hiding it: seeing this
   // fence means knowing the container, which is the parser §5.2 exists to avoid.
-  assert.deepEqual(codeLines("> ```\n> code\n> ```\n"), setOf());
+  assert.deepEqual(fenced("> ```\n> code\n> ```\n"), setOf());
 });
 
 // --- reading (§3.3 reader rules, §8) --------------------------------------
@@ -113,12 +116,12 @@ test("a marker in an opening fence info string is not a marker", () => {
   );
 });
 
-test("an inline code span still carries a marker", () => {
-  // §3.3 declines inline spans on purpose: that is the shape pandoc's native
-  // markdown writer produces when it mangles a trailing marker, and a mangled
-  // marker a tool can still see beats one that has silently stopped existing.
+test("an inline code span is content since v1.12", () => {
+  // §3.3 leaves inline spans to §3.5, which makes a closed one content too.
+  // pandoc's mangled form, a span followed by `{=html}`, stays a marker; both
+  // halves are pinned in code-spans.test.js.
   const md = "A line showing `<!-- stay:demo -->` inline.\n";
-  assert.deepEqual(markerIds(parseDocument(md)), ["demo"]);
+  assert.deepEqual(markerIds(parseDocument(md)), []);
 });
 
 // --- writing (§3.3 writer rules) ------------------------------------------
@@ -211,7 +214,7 @@ test("a fence opening on a list-marker line swallows the rest of the document", 
   // is the test below.
   const md =
     "- ```txt\n  code\n  ```\n\nA later paragraph.\n<!-- stay:live hash=sha256:dead -->\n";
-  assert.deepEqual(codeLines(md), setOf(3, 4, 5, 6, 7));
+  assert.deepEqual(fenced(md), setOf(3, 4, 5, 6, 7));
   assert.deepEqual(markerIds(parseDocument(md)), []);
   assert.deepEqual(lintDocument(md).findings, []);
   assert.deepEqual(stamp(md, { newId: ids() }).minted, []);
@@ -222,7 +225,7 @@ test("a fence on its own line inside a list item is seen correctly", () => {
   // defect in the rule: a balanced pair at one to three spaces of indent opens and
   // closes exactly where CommonMark puts it.
   const md = "- item:\n\n  ```py\n  code\n  ```\n\nAfter.\n<!-- stay:live -->\n";
-  assert.deepEqual(codeLines(md), setOf(3, 4, 5));
+  assert.deepEqual(fenced(md), setOf(3, 4, 5));
   assert.deepEqual(markerIds(parseDocument(md)), ["live"]);
 });
 
@@ -240,7 +243,7 @@ test("a phantom fence that later closes still refuses the block it straddles", (
   // started" is the fail-closed side of a question the line scan cannot answer,
   // not a proxy that happens to be wrong here.
   const md = "- ```txt\n  code\n  ```\n\nA paragraph.\n```\nAfter.\n";
-  assert.deepEqual(codeLines(md), setOf(3, 4, 5, 6));
+  assert.deepEqual(fenced(md), setOf(3, 4, 5, 6));
   assert.deepEqual(stamp(md, { newId: ids() }).minted, []);
 });
 

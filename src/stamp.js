@@ -13,11 +13,13 @@ import {
   findMarkers,
   insertMarkerHash,
   isBlockStayMarker,
+  markerOutsideCode,
   replaceMarkerHash,
   replaceMarkerId,
   rewriteMarkers,
+  scanMarkerRecords,
 } from "./markers.js";
-import { codeLines, fenceState, stripMarkersOutsideCode } from "./code.js";
+import { codeLines, codeMask, fenceState, stripMarkersOutsideCode } from "./code.js";
 import { blankFrontmatter, frontmatterWriteRefusal, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
 import { mintId, ID_CHARSET } from "./id.js";
@@ -151,8 +153,11 @@ export function stamp(md, opts = {}) {
   // what parseDocument sees. `openAfter` is the writer's half of the rule: a
   // marker appended after a line a fence is still open on lands *inside the
   // listing*, which is how this project's own §4 grammar block acquired a real
-  // marker in the middle of its ABNF.
-  const { inside: code, openAfter: fenceOpenAfter } = fenceState(blankFrontmatter(norm));
+  // marker in the middle of its ABNF. The mask adds §3.5's closed inline code
+  // spans to the fence lines, so a quoted example never stamps its block.
+  const blanked = blankFrontmatter(norm);
+  const { inside: fenceLines, openAfter: fenceOpenAfter } = fenceState(blanked);
+  const code = codeMask(blanked, fenceLines);
 
   // Existing ids across the whole document, so a minted id can't collide. The raw
   // scan is deliberate: an id shown in a fenced example is not an id, but minting
@@ -169,15 +174,17 @@ export function stamp(md, opts = {}) {
   // Blanking is line-for-line, so the insertion points below still index `lines`.
   const needsStamp = []; // { lastLine0, content }
   let current = null;
-  for (const [startLine, chunk] of segmentBlankLine(blankFrontmatter(norm))) {
+  for (const [startLine, chunk] of segmentBlankLine(blanked)) {
     const content = asciiTrim(stripMarkersOutsideCode(chunk, code, startLine - 1));
     // SPEC.md §16: a `subhash` marker addresses a list item, so it never makes the
     // block around it stamped. Unconditional, like the guard in restamp: a tool that
     // cannot see children still has to leave the container stampable, or a
     // child-stamped list never gets a stay of its own.
-    const hasId = findMarkers(chunk, startLine - 1).some(
-      // §3.3: an example never stamps its block.
-      (mk) => mk.id && isBlockStayMarker(mk) && !code.has(mk.line),
+    const hasId = scanMarkerRecords(chunk, startLine - 1).some(
+      // §3.3, §3.5: an example never stamps its block. A chunk begins at the
+      // start of its first line, so a record's column is its document column.
+      (record) =>
+        record.marker.id && isBlockStayMarker(record.marker) && markerOutsideCode(record, code),
     );
     if (content !== "") {
       const nLines = chunk.split("\n").length;

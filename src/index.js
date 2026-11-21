@@ -1,4 +1,4 @@
-// markstay JS reference implementation, public API (SPEC.md v1.11, parser-free
+// markstay JS reference implementation, public API (SPEC.md v1.12, parser-free
 // core). Mirrors the Python reference surface (linter/markstay_lint.py and
 // eval/attachment/{quote,resolver}.py). Zero runtime dependencies; Node built-ins
 // only. CommonMark mode (§5.2) is deferred from v1.

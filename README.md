@@ -3,11 +3,11 @@
 [![npm](https://img.shields.io/npm/v/markstay)](https://www.npmjs.com/package/markstay)
 [![bundle size](https://img.shields.io/bundlephobia/minzip/markstay)](https://bundlephobia.com/package/markstay)
 [![tests](https://img.shields.io/github/actions/workflow/status/markstaymd/markstay-core/test.yml?label=tests)](https://github.com/markstaymd/markstay-core/actions/workflows/test.yml)
-[![spec](https://img.shields.io/badge/spec-v1.11-blue)](https://markstay.org)
+[![spec](https://img.shields.io/badge/spec-v1.12-blue)](https://markstay.org)
 ![License](https://img.shields.io/npm/l/markstay)
 
 A second, independent implementation of the [markstay spec](https://markstay.org)
-(v1.11), in zero-dependency JavaScript. Its purpose is to validate that the
+(v1.12), in zero-dependency JavaScript. Its purpose is to validate that the
 standard is unambiguous: where the spec's two central promises (§8 hashing and §9
 recovery) used to be defined *by reference to the Python implementation*, a second
 implementation gated by a shared language-neutral conformance corpus turns "two
@@ -154,7 +154,7 @@ src/
   ratio.js     SequenceMatcher.ratio over Unicode code points (the §9 crux)
   hash.js      §8 normalization + SHA-256 body hashing
   markers.js   §3/§4 strict host-first marker grammar + discovery
-  code.js      §3.3 fenced-code mask (a marker in a fence is content)
+  code.js      §3.3 fenced-code + §3.5 inline-code-span mask (a marker in code is content)
   segment.js   §5 blank-line block segmentation
   parse.js     §5 document -> content blocks with lexical marker tokens
   lint.js      §7/§8/§10 lint + §11 regeneration diff
@@ -172,6 +172,8 @@ test/
   markers.test.js       strict §4 discovery, host close, and raw-preservation tests
   unit.test.js          behavioral ports of the Python reference's lint/attach tests
   stamp.test.js         write-path invariants (stamp/restamp/repair, idempotence)
+  fenced-code.test.js   §3.3 fenced code is content
+  code-spans.test.js    §3.5 closed inline code spans are content, and where the scan stops
 ```
 
 ## Public API
@@ -223,15 +225,15 @@ node --test          # or: npm test
 > is treated as a script path, so it errors; use `node --test` or an explicit
 > glob (`node --test test/*.test.js`).
 
-The shared corpus contributes 531 cross-language assertions; CLI and unit tests
+The shared corpus contributes 580 cross-language assertions; CLI and unit tests
 cover the Git adapter, rendering, and write-path invariants around it.
 
 ## The conformance corpus (the actual deliverable)
 
 The corpus lives under [`conformance/`](conformance) and is shared with the Python
-reference. **531 core vectors** across two tiers, plus two optional profiles that this
+reference. **580 core vectors** across two tiers, plus two optional profiles that this
 reference **declines**: `rows` (SPEC.md §5.6 table-row identity and §3.4 carrier
-refusals, 32 vectors) and `items` (SPEC.md §5.5 list-item recovery, §9.2 tier 0, and
+refusals, 34 vectors) and `items` (SPEC.md §5.5 list-item recovery, §9.2 tier 0, and
 the §5.3 write refusal per item, 9 vectors).
 §16 keeps child segmentation optional and this implementation does not segment
 child blocks. Declining is a declared, asserted state rather than a silent skip,
@@ -242,18 +244,18 @@ changes, or if a profile it has never heard of turns up.
 |----------|-----:|----:|--------|
 | hash     | 10   | 14  | §8 ASCII normalization + SHA-256 + truncation (incl. NBSP kept) |
 | markers  | 24   | 12  | §3/§4 grammar, malformed, positional-id (no rescue), uppercase-hex, overlapping candidates |
-| parse    | 50   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion, the thematic-break spans it must not eat, and §3.3's fenced-code mask |
-| lint     | 12   | 8   | §7/§8/§10 findings (ordered) |
+| parse    | 91   | 9   | §5 blank-line segmentation + marker attachment, incl. the leading-frontmatter exclusion, the thematic-break spans it must not eat, §3.3's fenced-code mask and §3.5's inline-code-span mask |
+| lint     | 17   | 8   | §7/§8/§10 findings (ordered) |
 | diff     | 70   | 6   | §11 regeneration diff (ordered), incl. the relocated id |
 | seqmatch | 9    | 143 | raw Ratcliff/Obershelp ratio + matching blocks |
 | score    | 12   | 19  | §9 wrappers: body score, context bonus, best match, ASCII fold |
 | resolve  | 48   | 9   | §9.1 ladder + margin guard, one block per id |
 | anchors  | 4    | 0   | §9 selector storage, which resolution cannot see |
 | mint     | 4    | 0   | §6 id minting over an injected byte source (incl. rejection) |
-| stamp    | 21   | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule and §5.3's write refusal |
+| stamp    | 24   | 20  | §3/§4/§6/§7/§8 write path: stamp, restamp, repair, incl. §3.3's writer rule, §3.5's quoted examples and §5.3's write refusal |
 | preserve | 7    | 0   | §11 instruction text + the measured prompt composition |
 | check    | 20   | 0   | §11 baseline pairing, findings, moves, tracking departures, deletion notes, scope |
-| **total**| **291** | **240** | |
+| **total**| **340** | **240** | |
 
 The `preserve` row is the odd one and deliberately so: it holds plain prose rather
 than a computation. Each implementation carries its own copy of the §11 instruction
@@ -334,12 +336,46 @@ change to either implementation that breaks agreement fails one of them.
   rather than hidden**: a fence indented four spaces or carrying a blockquote or
   list-item prefix on the opening line is invisible to the line scan, so a marker
   after it can go silent. It fails closed (nothing is compared, the block just
-  looks unstamped) rather than corrupting anything. **Inline code spans are
-  deliberately out of scope**: a marker mangled into a span is still one a tool can
-  see, which beats one that has silently stopped existing. **Migration:** a
-  document whose body gained a fenced marker-shaped string drifts once and a
-  `restamp` clears it; a fence whose only marker was an example is now unstamped
-  and takes a fresh stay on the next `stamp`.
+  looks unstamped) rather than corrupting anything. Inline code spans are §3.5's,
+  below. **Migration:** a document whose body gained a fenced marker-shaped string
+  drifts once and a `restamp` clears it; a fence whose only marker was an example
+  is unstamped and takes a fresh stay on the next `stamp`.
+- **A closed inline code span is content too (§3.5, v1.12):** a marker-shaped
+  string that *opens* inside one identifies no block, stays in the hashed body, and
+  is never rewritten, so a review or tracker quoting an example inline carries no
+  duplicate id and no stay nobody owns. `codeLines` returns a `CodeMask`: as a
+  `Set` it is still the fenced lines, and its `spans` maps a line to the content
+  columns of each closed span on it, in UTF-16 code units of the LF-normalized
+  line. A marker is judged by its opener's column, which the scanner measures in
+  the same unit, so `stripMarkersOutsideCode`, `rewriteMarkers`, `parseDocument`
+  and the write path all ask one question. That column lives on the internal scan
+  record (`scanMarkerRecords`), not on the public `Marker`: it is positional, and
+  the reference keeps it off marker equality, so `findMarkers` output and
+  `parseDocument`'s block markers carry no `column`. The span is found by a line
+  scan that pairs backtick runs of equal length on one line, and it stops for the
+  rest of the paragraph wherever CommonMark or MDX could still read the marker as
+  a live comment. Outside every span, it stops at a run with no closer on its
+  line, a `<`, a `{`, a `]` followed by `(`, `[` or `:`
+  (an ordinary link whose destination or label closes before the next run and
+  holds none of `` ` < { ( [ \ " ' `` is passed over, and a label's closing `]` is
+  read again, since it may open a destination), a `[` not closed before the next
+  run by a `]` with no `[` or backslash before it, or an escaped backtick. Those
+  characters are not looked for inside an HTML-form marker-shaped string whose
+  body holds no `<`, `[`, `]`, `{` or `--`; every other marker-shaped string, MDX
+  form included, is read like text, so an MDX marker's own `{` stops the scan.
+  It also stops at any backtick run inside a marker-shaped string, whether it
+  would open, close or sit inside a span, and at an HTML block (a raw-text block
+  opens on `<script`, `<pre`, `<style` or `<textarea` not continued by a
+  tag-name character, and with U+017F standing for `s` and U+0130 or U+0131 for
+  `i`, the Unicode folds markdown-it applies to those names). The scan resumes only at a blank line once every type 1 to 5
+  end condition met since the block opened has been seen, including those of
+  blocks opened inside it. A span holding a `|` stops the scan too, since a GFM
+  table splits its cells first, and a span followed by pandoc's `{=html}` stays
+  live. The scan may therefore read more markers than a renderer and never fewer:
+  a quote it cannot be sure of stays a marker. **Migration** has §3.3's two cases: a
+  block that also has its own stay drifts once and a `restamp` clears it, and a
+  block whose only stay was a quoted example takes a fresh one on the next
+  `stamp`.
 - **Positional id (§4):** the id is the first token after `stay:` (`^`-anchored);
   a marker whose first token is a bare `k=v` is malformed even if a later
   `stay:ID` appears in the body, matching the Python reference's `ID_RE.match`.

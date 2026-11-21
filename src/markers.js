@@ -288,12 +288,45 @@ export function scanMarkerRecords(text, lineOffset = 0) {
           rawBoundaries[bodyStart + hashAttribute.valueEnd] - start,
         ]
       : null;
-    records.push({ start, end, body, marker, staySpan, hashSpan });
+    // SPEC.md §3.5 (v1.12): the 0-based column of the opener in its
+    // LF-normalized line, in UTF-16 code units, which the code mask's span half
+    // is measured in too. It lives on the record rather than the public Marker
+    // because it is positional: the reference keeps it off marker equality.
+    const column = opener.start - (normalized.lastIndexOf("\n", opener.start - 1) + 1);
+    records.push({ start, end, column, body, marker, staySpan, hashSpan });
     // Every opener is an independent candidate. In particular, a valid outer
     // marker does not hide a nested opener from §5.6's overlap refusal.
     cursor = opener.start + 1;
   }
   return records;
+}
+
+/**
+ * True when a code mask leaves nothing to honour: no fenced line (§3.3) and no
+ * closed inline code span (§3.5). A plain `Set` of fenced lines is still a mask,
+ * with no span half. Both halves count, because a document with no fence can
+ * still have a span to honour.
+ */
+export function maskIsEmpty(code) {
+  return code == null || (code.size === 0 && !(code.spans && code.spans.size > 0));
+}
+
+/**
+ * Whether a scanned marker record is a marker rather than code content: its
+ * opener lies neither on a §3.3 fenced line nor inside a §3.5 closed inline code
+ * span. A marker is judged by where it *opens*, the line for a fence and the
+ * column for a span, since the grammar can carry it across lines and close it
+ * inside code it opened outside. Every path that separates active markers from
+ * marker-shaped content asks here, so the reading is one decision rather than a
+ * copy of the same expression at each seam.
+ */
+export function markerOutsideCode(record, code) {
+  if (maskIsEmpty(code)) return true;
+  const line = record.marker.line;
+  if (code.has(line)) return false;
+  const spans = code.spans?.get(line);
+  if (!spans) return true;
+  return !spans.some(([start, end]) => start <= record.column && record.column < end);
 }
 
 /** True when a lexical marker may identify its containing §5 block. */
@@ -360,13 +393,11 @@ export function stripMarkers(text) {
 
 /**
  * Rewrite complete valid markers in document order. Markers whose opener lies on
- * a §3.3 fenced-code line, or whose span overlaps another active valid marker,
- * remain byte-for-byte unchanged.
+ * a §3.3 fenced-code line or inside a §3.5 closed inline code span, or whose span
+ * overlaps another active valid marker, remain byte-for-byte unchanged.
  */
 export function rewriteMarkers(text, transform, code = null) {
-  const active = removableRecords(text).filter(
-    (record) => !(code && code.has(record.marker.line)),
-  );
+  const active = removableRecords(text).filter((record) => markerOutsideCode(record, code));
   const overlaps = overlappingRecords(active);
   const records = active.filter((record) => !overlaps.has(record));
   return rewriteRecords(text, records, (marker, record) =>

@@ -1,7 +1,7 @@
 // Document parsing into content blocks with lexical marker tokens (SPEC.md §5).
 // Port of `parse_document` (blank-line mode) from linter/markstay_lint.py.
 
-import { scanMarkerRecords } from "./markers.js";
+import { markerOutsideCode, scanMarkerRecords } from "./markers.js";
 import { codeLines } from "./code.js";
 import { blankFrontmatter, segmentBlankLine } from "./segment.js";
 import { asciiTrim } from "./text.js";
@@ -93,15 +93,15 @@ export function parseDocument(md, mode = "blank-line") {
   }
   const normalized = md.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const text = blankFrontmatter(normalized);
-  // SPEC.md §3.3: text inside a fenced code block is content. The rule is computed
-  // once over the whole document and threaded, on the `blankFrontmatter`
-  // precedent, because neither segmenter has a concept of a fence and
-  // `findMarkers` is handed chunks. Blanking preserves line numbers, so this mask
-  // indexes the caller's text too.
+  // SPEC.md §3.3 and §3.5: text inside a fenced code block or a closed inline
+  // code span is content. The rule is computed once over the whole document and
+  // threaded, on the `blankFrontmatter` precedent, because neither segmenter has
+  // a concept of a fence and `findMarkers` is handed chunks. Blanking preserves
+  // line numbers and columns, so this mask indexes the caller's text too.
   const code = codeLines(text);
   const chunks = segmentBlankLine(text);
   const documentRecords = documentMarkerRecords(md, normalized, text);
-  const activeRecords = documentRecords.filter((record) => !code.has(record.marker.line));
+  const activeRecords = documentRecords.filter((record) => markerOutsideCode(record, code));
   const removableRecords = activeRecords.filter((record) => !record.marker.malformed);
   const starts = lineStarts(text);
 
@@ -110,7 +110,7 @@ export function parseDocument(md, mode = "blank-line") {
   for (const [start, chunk] of chunks) {
     const chunkStart = starts[start - 1];
     const chunkEnd = chunkStart + chunk.length;
-    // §3.3: a marker-shaped string in a fence is content, not a marker.
+    // §3.3, §3.5: a marker-shaped string in code is content, not a marker.
     const markers = activeRecords
       .filter((record) => chunkStart <= record.start && record.start < chunkEnd)
       .map((record) => record.marker);

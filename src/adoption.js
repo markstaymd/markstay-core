@@ -7,6 +7,7 @@
 
 import { codeLines } from "./code.js";
 import { normalizeBody } from "./hash.js";
+import { markerOutsideCode } from "./markers.js";
 import { documentMarkerRecords, lineStarts, stripRecordRanges } from "./parse.js";
 import { blankFrontmatter, segmentBlankLine } from "./segment.js";
 
@@ -68,7 +69,7 @@ function adoptionView(md, segment, ids) {
   const text = blankFrontmatter(normalized);
   const code = codeLines(text);
   const records = documentMarkerRecords(md, normalized, text).filter(
-    (r) => !code.has(r.marker.line) && !r.marker.malformed,
+    (r) => markerOutsideCode(r, code) && !r.marker.malformed,
   );
   const counts = new Map();
   for (const r of records) {
